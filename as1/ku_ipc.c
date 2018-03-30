@@ -22,10 +22,10 @@ typedef struct queue
     struct list_head list;
     MSGBUF buf;
     int key;
+    int size;
 } QUEUE;
 
-MSGBUF msg_buf;
-QUEUE msg_q[MAXVOL];
+QUEUE msg_q;
 
 static struct cdev *cd_cdev;
 spinlock_t ku_lock;
@@ -66,6 +66,8 @@ static int ku_ipc_write(MSGBUF *msg)
 static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
     MSGBUF *user_buf;
+    QUEUE *temp;
+    struct list_head *pos, *q = NULL;
     int size;
 
     user_buf = (MSGBUF*)arg;
@@ -79,6 +81,46 @@ static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
             size = ku_ipc_write(user_buf);
             printk("[KU_IPC]write - %d\n", size);
             break;
+        case KU_CHECK:
+            // is queue empty
+            if(list_empty(&msg_q.list))
+                return 0;
+
+            spin_lock(&ku_lock);
+            list_for_each_entry(temp, &msg_q.list, list)
+            {
+                if(temp->key == arg)
+                {
+                    spin_unlock(&ku_lock);
+                    return 0;
+                }
+            }
+            spin_unlock(&ku_lock);
+
+            // duplicated keys are not allowed
+            return -1;
+        case KU_CREAT:
+            spin_lock(&ku_lock);
+            // have to develop more :(
+            spin_unlock(&ku_lock);
+
+            printk("[KU_IPC]create queue - %d\n", arg);
+            break;
+        case KU_CLOSE:
+            spin_lock(&ku_lock);
+            list_for_each_safe(pos, q, &msg_q.list)
+            {
+                temp = list_entry(pos, QUEUE, list);
+                
+                // have to develop more :(
+                if(temp->key == arg)
+                    list_del(pos);
+                kfree(temp);
+            }
+            spin_unlock(&ku_lock);
+
+            printk("[KU_IPC]close queue - %d\n", arg);
+            return 0;
     }
 
     return 0;
@@ -107,7 +149,10 @@ struct file_operations ku_ipc_fops = {
 static int __init ku_ipc_init(void)
 {
     printk("[KU_IPC]Init\n");
+
     INIT_LIST_HEAD(&msg_q.list);
+    //INIT_LIST_HEAD(&msg_q.buf.list);
+    msg_q.buf.data = kmalloc(KUIPC_MAXMSG, GFP_KERNEL);
 
     cd_cdev = cdev_alloc();
     alloc_chrdev_region(&dev_num, 0, 1, DEV_NAME);
@@ -120,6 +165,7 @@ static int __init ku_ipc_init(void)
 static void __exit ku_ipc_exit(void)
 {
     printk("[KU_IPC]Exit\n");
+
     cdev_del(cd_cdev);
     unregister_chrdev_region(dev_num, 1);
 }
