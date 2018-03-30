@@ -1,30 +1,27 @@
-#include <stdio.h>
+#include <unistd.h>
+#include <fcntl.h>
 
-#define IPC_CREAT
-#define IPC_EXCL
+#include "ku_ipc.h"
 
-struct msgbuf
-{
-    long type;
-    char text[1];
-};
+#define FALSE 0
+#define TRUE 1
 
 int ku_msgget(int key, int msgflg);
 int ku_msgclose(int msqid);
 int ku_msgsnd(int msqid, void *msgp, int msgsz, int msgflg);
 int ku_msgrcv(int msqid, void *msgp, int msgsz, long msgtyp, int msgflg);
-
-int main(void)
-{
-    return 0;
-}
+int ku_msgchk(int msqid);
 
 int ku_msgget(int key, int msgflg)
 {
-    if(msgflg == IPC_CREAT)
-        return 0;
-    else if(msgflg == IPC_EXCL)
-        return -1;
+    switch(msgflg)
+    {
+        case IPC_CREAT:
+            return 0;
+        case IPC_EXCL:
+            return -1;
+    }
+
     return -1;
 }
 
@@ -35,10 +32,20 @@ int ku_msgclose(int msqid)
 
 int ku_msgsnd(int msqid, void *msgp, int msgsz, int msgflg)
 {
+    int dev = open("/dev/ku_ipc_dev", O_RDWR);
+    write(dev, msgp, msgsz);
     return 0;
 }
 
 int ku_msgrcv(int msgid, void *msgp, int msgsz, long msgtyp, int msgflg)
 {
+    int dev = open("/dev/ku_ipc_dev", O_RDWR);
+    read(dev, msgp, msgsz);
     return 0;
+}
+
+int ku_msqchk(int msqid)
+{
+
+    return TRUE;
 }
