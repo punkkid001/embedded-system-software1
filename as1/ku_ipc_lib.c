@@ -46,6 +46,5 @@ int ku_msgrcv(int msgid, void *msgp, int msgsz, long msgtyp, int msgflg)
 
 int ku_msqchk(int msqid)
 {
-
     return TRUE;
 }

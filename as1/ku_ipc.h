@@ -1,3 +1,5 @@
+#include <linux/list.h>
+
 #define KUIPC_MAXMSG 1024
 #define KUIPC_MAXVOL 1024
 #define IPC_CREAT 100
@@ -20,3 +22,11 @@ typedef struct msgbuf
     long type;
     char text[KUIPC_MAXMSG];
 } MSGBUF;
+
+typedef struct rcvmsg
+{
+    struct list_head list;
+    long type;
+    int size;
+    struct msgbuf msg;
+} RCVMSG;

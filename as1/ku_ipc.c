@@ -27,7 +27,9 @@ typedef struct queue
 MSGBUF msg_buf;
 QUEUE msg_q[MAXVOL];
 
+static struct cdev *cd_cdev;
 spinlock_t ku_lock;
+dev_t dev_num;
 
 void delay(int sec)
 {
@@ -104,15 +106,22 @@ struct file_operations ku_ipc_fops = {
 
 static int __init ku_ipc_init(void)
 {
+    printk("[KU_IPC]Init\n");
     INIT_LIST_HEAD(&msg_q.list);
 
-    printk("[KU_IPC]Init\n")
+    cd_cdev = cdev_alloc();
+    alloc_chrdev_region(&dev_num, 0, 1, DEV_NAME);
+    cdev_init(cd_cdev, &ku_ipc_fops);
+    cdev_add(cd_cdev, dev_num, 1);
+    
     return 0;
 }
 
 static void __exit ku_ipc_exit(void)
 {
     printk("[KU_IPC]Exit\n");
+    cdev_del(cd_cdev);
+    unregister_chrdev_region(dev_num, 1);
 }
 
 module_init(ku_ipc_init);
