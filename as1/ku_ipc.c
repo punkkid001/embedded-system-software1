@@ -20,7 +20,7 @@ MODULE_LICENSE("GPL");
 typedef struct queue
 {
     struct list_head list;
-    MSGBUF buf;
+    MSGBUF msg_buf;
     int key;
     int size;
 } QUEUE;
@@ -65,10 +65,10 @@ static int ku_ipc_write(MSGBUF *msg)
 
 static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
-    MSGBUF *user_buf;
-    QUEUE *temp;
-    struct list_head *pos, *q = NULL;
-    int size;
+    QUEUE *temp = NULL;
+    MSGBUF *user_buf = NULL;
+    struct list_head *pos = NULL, *q = NULL;
+    int size = 0;
 
     user_buf = (MSGBUF*)arg;
     switch(cmd)
@@ -77,10 +77,12 @@ static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
             size = ku_ipc_read(user_buf);
             printk("[KU_IPC]read - %d\n", size);
             break;
+
         case KU_WRITE:
             size = ku_ipc_write(user_buf);
             printk("[KU_IPC]write - %d\n", size);
             break;
+
         case KU_CHECK:
             // is queue empty
             if(list_empty(&msg_q.list))
@@ -89,7 +91,7 @@ static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
             spin_lock(&ku_lock);
             list_for_each_entry(temp, &msg_q.list, list)
             {
-                if(temp->key == arg)
+                if(temp->key == (int)arg)
                 {
                     spin_unlock(&ku_lock);
                     return 0;
@@ -99,28 +101,58 @@ static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
             // duplicated keys are not allowed
             return -1;
+
         case KU_CREAT:
             spin_lock(&ku_lock);
-            // have to develop more :(
+            
+            temp = (QUEUE*)kmalloc(sizeof(QUEUE), GFP_KERNEL);
+            temp->key = (int)arg;
+            temp->size = 0;
+
+            INIT_LIST_HEAD(&(temp->msg_buf).list);
+            (temp->msg_buf).data = kmalloc(KUIPC_MAXMSG);
+
+            list_add_tail(&temp->list, &msg_q.list);
             spin_unlock(&ku_lock);
 
-            printk("[KU_IPC]create queue - %d\n", arg);
-            break;
+            printk("[KU_IPC]create queue - %d\n", (int)arg);
+            return arg;
+
         case KU_CLOSE:
             spin_lock(&ku_lock);
+
+            // remove list node (queue)
             list_for_each_safe(pos, q, &msg_q.list)
             {
                 temp = list_entry(pos, QUEUE, list);
-                
-                // have to develop more :(
-                if(temp->key == arg)
-                    list_del(pos);
-                kfree(temp);
-            }
-            spin_unlock(&ku_lock);
 
-            printk("[KU_IPC]close queue - %d\n", arg);
-            return 0;
+                // success to remove queue
+                if(temp->key == arg)
+                {
+                    MSGBUF *msg;
+                    struct list_head *ipos, *iq;
+
+                    // remove list node (msg_buf)
+                    list_for_each_safe(ipos, iq, &(temp->msg_buf).list)
+                    {
+                        msg = list_entry(ipos, MSGBUF, list);
+                        list_del(ipos);
+                        kfree(msg->data);    // remove msg data
+                        kfree(msg);    // remove msg node
+                    }
+
+                    list_del(pos);
+                    kfree(temp);    // remove temp node (queue)
+                    spin_unlock(&ku_lock);
+
+                    printk("[KU_IPC]close queue - %d\n", (int)arg);
+                    return 0;
+                }
+            }
+
+            // fail to remove queue
+            spin_unlock(&ku_lock);
+            return -1;
     }
 
     return 0;
@@ -151,7 +183,6 @@ static int __init ku_ipc_init(void)
     printk("[KU_IPC]Init\n");
 
     INIT_LIST_HEAD(&msg_q.list);
-    //INIT_LIST_HEAD(&msg_q.buf.list);
     msg_q.buf.data = kmalloc(KUIPC_MAXMSG, GFP_KERNEL);
 
     cd_cdev = cdev_alloc();

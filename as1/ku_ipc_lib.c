@@ -32,6 +32,7 @@ int ku_msgget(int key, int msgflg)
                 close(dev);
                 return msqid;
             case IPC_EXCL:
+                close(dev);
                 return -1;
         }
 
