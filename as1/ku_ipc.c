@@ -36,28 +36,39 @@ int ku_ipc_volume = 0;
 // ku_msgrcv
 static int ku_ipc_read(struct file *file, const char *buf, size_t len, loff_t *lof)
 {
-    QUEUE *temp = NULL;
+    QUEUE *temp = NULL, *tmp = NULL;
     MSGBUF *msg = (MSGBUF*)buf;
-    struct list_head *pos = NULL, *q = NULL;
+    //struct list_head *pos = NULL, *q = NULL;
 
     spin_lock(&ku_lock);
     list_for_each_entry(temp, &msgq.list, list)
     {
         if(temp->key == msg->id)
         {
-            while(1)
+            list_for_each_entry(tmp, &(temp->msg_buf.list), list)
             {
-                if
-                    size = copy_to_user(msg, msg_buf, sizeof(MSGBUF));
-                memset(msg_buf, '\0', sizeof(MSGBUF));
-                spin_unlock(&ku_lock);
+                if(tmp->type == msg->type && tmp->size <= len)
+                {
+                    size = copy_to_user(msg->data, tmp->data, len);
+                    spin_unlock(&ku_lock);
+                    return size;
+                }
 
-                return size;
+                if(msg->flag == 0)
+                {
+                    size = copy_to_user(msg->data, tmp->data, sizeof(tmp->data));
+                    spin_unlock(&ku_lock);
+                    return size;
+                }
+
+                return -2;    // lack of space
             }
+
+            break;
         }
     }
-    spin_unlock(&ku_lock);
 
+    spin_unlock(&ku_lock);
     return -1;    // fail to read
 }
 
