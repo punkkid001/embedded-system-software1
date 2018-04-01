@@ -4,9 +4,6 @@
 
 #include "ku_ipc.h"
 
-#define FALSE 0
-#define TRUE 1
-
 int ku_msgget(int key, int msgflg);
 int ku_msgclose(int msqid);
 int ku_msgsnd(int msqid, void *msgp, int msgsz, int msgflg);
@@ -59,17 +56,26 @@ int ku_msgclose(int msqid)
     return result;
 }
 
+// ku_ipc_write
 int ku_msgsnd(int msqid, void *msgp, int msgsz, int msgflg)
 {
+    MSGBUF *msg;
     int dev, result;
     
     dev = open("/dev/ku_ipc_dev", O_RDWR);
     // dev open error
     if(dev == -1)
         return -1;
-    result = write(dev, msgp, msgsz);
 
-    if(result == -1)
+    msg->type = 0;    // is it okay?
+    msg->id = msqid;
+    msg->size = msgsz;
+    msg->flag = msgflg;
+    msg->data = msgp;
+
+    result = write(dev, msg, sizeof(msg));
+
+    if(result < 0)
     {
         if(msgflg & IPC_NOWAIT != 0)
             return -1;
@@ -77,18 +83,30 @@ int ku_msgsnd(int msqid, void *msgp, int msgsz, int msgflg)
             result = write(dev, msgp, msgsz);
     }
 
-    return result;
+    if(result == 0)
+        return result;
+    else
+        return -1;
 }
 
+// ku_ipc_read
 int ku_msgrcv(int msgid, void *msgp, int msgsz, long msgtyp, int msgflg)
 {
+    MSGBUF *msg;
     int dev, result;
 
     dev = open("/dev/ku_ipc_dev", O_RDWR);
     // dev open error
     if(dev == -1)
         return -1;
-    result = read(dev, msgp, msgsz);
+
+    msg->type = msgtyp;
+    msg->id = msgid;
+    msg->size = msgsz;
+    msg->data = msgp;
+    msg->flag = msgflg;
+
+    result = read(dev, (char*)msg, sizeof(msg));
 
     if(result == -1)
     {

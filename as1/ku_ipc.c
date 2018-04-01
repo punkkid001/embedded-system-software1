@@ -25,7 +25,7 @@ typedef struct queue
     int size;
 } QUEUE;
 
-QUEUE msg_q;
+QUEUE msg_q;    // root queue
 
 static struct cdev *cd_cdev;
 spinlock_t ku_lock;
@@ -33,36 +33,66 @@ dev_t dev_num;
 
 int ku_ipc_volume = 0;
 
-void delay(int sec)
+// ku_msgrcv
+static int ku_ipc_read(struct file *file, const char *buf, size_t len, loff_t *lof)
 {
-    int i, j;
-    for(i=0; i<sec; i++)
-        for(j=0; j<1000; j++)
-            udelay(1000);
-}
-
-static int ku_ipc_read(MSGBUF *msg)
-{
-    int size;
-
-    delay(1);
-    spin_lock(&ku_lock);
-    size = copy_to_user(msg, msg_buf, sizeof(MSGBUF));
-    memset(msg_buf, '\0', sizeof(MSGBUF));
-    spin_unlock(&ku_lock);
-
-    return size;
-}
-
-static int ku_ipc_write(MSGBUF *msg)
-{
-    int size;
+    QUEUE *temp = NULL;
+    MSGBUF *msg = (MSGBUF*)buf;
 
     spin_lock(&ku_lock);
-    size = copy_from_user(msg_buf, msg, sizeof(MSGBUF));
-    spin_unlock(&ku_lock);
+    list_for_each_entry(temp, &msgq.list, list)
+    {
+        if(temp->key == msg->id)
+        {
+            while(1)
+            {
+                if
+                    size = copy_to_user(msg, msg_buf, sizeof(MSGBUF));
+                memset(msg_buf, '\0', sizeof(MSGBUF));
+                spin_unlock(&ku_lock);
 
-    return size;
+                return size;
+
+            }
+        }
+    }
+}
+
+// ku_msgsnd
+static int ku_ipc_write(struct file *file, const char *buf, size_t len, loff_t *lof)
+{
+    QUEUE *temp = NULL;
+    MSGBUF *msg = NULL;
+    struct list_head *pos, *q;
+    int size = 0, flag = 0;
+
+    if(len >= KUIPC_MAXMSG)
+        return -2;    // oversize
+
+    msg = (MSGBUF*)kmalloc(sizeof(MSGBUF), GFP_KERNEL);
+    // msg = kmalloc(len, GFP_KERNEL); : is it okay?
+    if(copy_from_user((void*)msg, (void*)buf, len) > 0)
+    {
+        spin_lock(&ku_lock);
+        list_for_each_entry(temp, &msgq.list, list)
+        {
+            if(temp->key == msg->key)
+            {
+                size = temp.size + msg->size;
+                if(size >= KUIPC_MAXVOL)
+                    return -3;    // lack of space
+
+                //msg->type = *((long*)(msg->data));
+                list_add_tail(&msg->list, &(temp->msg_buf).list);
+                temp->size += msg->size;
+                break;
+            }
+        }
+        spin_unlock(&ku_lock);
+        return 0;    // success to write
+    }
+
+    return -1;    // some error occured
 }
 
 static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
@@ -75,45 +105,41 @@ static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
     user_buf = (MSGBUF*)arg;
     switch(cmd)
     {
-        case KU_READ:
-            size = ku_ipc_read(user_buf);
-            printk("[KU_IPC]read - %d\n", size);
-            break;
-
-        case KU_WRITE:
-            size = ku_ipc_write(user_buf);
-            printk("[KU_IPC]write - %d\n", size);
-            break;
-
         case KU_CHECK:
-            // is queue empty
-            if(list_empty(&msg_q.list))
-                return -1;
+            if(!list_empty(&msg_q.list))
+                return -1;    // queue is not empty
 
             spin_lock(&ku_lock);
             list_for_each_entry(temp, &msg_q.list, list)
             {
+                // duplicated keys are not allowed
                 if(temp->key == (int)arg)
                 {
                     spin_unlock(&ku_lock);
-                    return 0;
+                    return -1;
                 }
             }
-            spin_unlock(&ku_lock);
 
-            // duplicated keys are not allowed
-            return -1;
+            spin_unlock(&ku_lock);
+            return 0;
 
         case KU_CREAT:
-            spin_lock(&ku_lock);
             if(ku_ipc_volume <= KUIPC_MAXVOL)
             {
+                spin_lock(&ku_lock);
                 temp = (QUEUE*)kmalloc(sizeof(QUEUE), GFP_KERNEL);
                 temp->key = (int)arg;
                 temp->size = 0;
 
                 INIT_LIST_HEAD(&(temp->msg_buf).list);
                 (temp->msg_buf).data = kmalloc(KUIPC_MAXMSG);
+
+                /*
+                   (temp->msg_buf).id = (int)arg;
+                   (temp->msg_buf).size = 0;
+                   (temp->msg_buf).flag = 0;
+                   (temp->msg_buf).data = NULL;
+                 */
 
                 list_add_tail(&temp->list, &msg_q.list);
                 ku_ipc_volume++;
@@ -124,14 +150,12 @@ static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
             }
 
             // queue volume is full
-            else
-                return -1;
+            return -1;
 
         case KU_CLOSE:
-            spin_lock(&ku_lock);
-
             if(ku_ipc_volume > 0)
             {
+                spin_lock(&ku_lock);
                 // remove list node (queue)
                 list_for_each_safe(pos, q, &msg_q.list)
                 {
@@ -164,8 +188,25 @@ static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
             }
 
             // fail to remove queue
-            spin_unlock(&ku_lock);
             return -1;
+
+        case KU_EMPTY:
+            spin_lock(&ku_lock);
+            list_for_each_entry(temp, &msg_q.list, list)
+            {
+                if(temp->key == (int)arg)
+                {
+                    // if(list_empty(&temp->list)
+                    if(list_empty(temp->list))
+                    {
+                        spin_unlock(&ku_lock);
+                        return 0;    // queue is empty
+                    }
+                    break;
+                }
+            }
+            spin_unlock(&ku_unlock);
+            return -1;    // queue is not empty
     }
 
     return 0;
@@ -196,13 +237,16 @@ static int __init ku_ipc_init(void)
     printk("[KU_IPC]Init\n");
 
     INIT_LIST_HEAD(&msg_q.list);
-    msg_q.buf.data = kmalloc(KUIPC_MAXMSG, GFP_KERNEL);
+    msg_q.key = 0;
+    msg_q.size = 0;
+    msg_q.buf = NULL;
+    //msg_q.buf.data = kmalloc(KUIPC_MAXMSG, GFP_KERNEL);
 
     cd_cdev = cdev_alloc();
     alloc_chrdev_region(&dev_num, 0, 1, DEV_NAME);
     cdev_init(cd_cdev, &ku_ipc_fops);
     cdev_add(cd_cdev, dev_num, 1);
-    
+
     return 0;
 }
 
