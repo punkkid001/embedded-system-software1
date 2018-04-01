@@ -20,9 +20,9 @@ MODULE_LICENSE("GPL");
 typedef struct queue
 {
     struct list_head list;
-    MSGBUF msg_buf;
-    int key;
-    int size;
+    MSGBUF msg_buf;    // messages in the queue
+    int key;    // queue id(key)
+    int size;    // capacity of the queue
 } QUEUE;
 
 QUEUE msg_q;    // root queue
@@ -38,6 +38,7 @@ static int ku_ipc_read(struct file *file, const char *buf, size_t len, loff_t *l
 {
     QUEUE *temp = NULL;
     MSGBUF *msg = (MSGBUF*)buf;
+    struct list_head *pos = NULL, *q = NULL;
 
     spin_lock(&ku_lock);
     list_for_each_entry(temp, &msgq.list, list)
@@ -52,10 +53,12 @@ static int ku_ipc_read(struct file *file, const char *buf, size_t len, loff_t *l
                 spin_unlock(&ku_lock);
 
                 return size;
-
             }
         }
     }
+    spin_unlock(&ku_lock);
+
+    return -1;    // fail to read
 }
 
 // ku_msgsnd
@@ -89,10 +92,11 @@ static int ku_ipc_write(struct file *file, const char *buf, size_t len, loff_t *
             }
         }
         spin_unlock(&ku_lock);
+        printk("[KU_IPC]write to queue id - %d\n", msg->key);
         return 0;    // success to write
     }
 
-    return -1;    // some error occured
+    return -1;    // fail to write
 }
 
 static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)

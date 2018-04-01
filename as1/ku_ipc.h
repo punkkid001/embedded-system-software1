@@ -38,10 +38,10 @@ typedef struct msgbuf
  * -2: oversize
  * -3: lack of space
  *
- *  <RELATIONSHIP>
- *  read = receive
- *  write = send
+ * <RELATIONSHIP>
+ * read = receive
+ * write = send
  *
- *  <WORD>
- *  id = key
+ * <WORD>
+ * id = key
 */
