@@ -51,27 +51,52 @@ int ku_msgclose(int msqid)
     int dev, result;
 
     dev = open("/dev/ku_ipc_dev", O_RDWR);
-    //dev open error
+    // dev open error
     if(dev == -1)
         return -1;
 
     result = ioctl(dev, KU_CLOSE, msqid);
-    if(result == 0)
-        return 0;
-    else
-        return -1;
+    return result;
 }
 
 int ku_msgsnd(int msqid, void *msgp, int msgsz, int msgflg)
 {
-    int dev = open("/dev/ku_ipc_dev", O_RDWR);
-    write(dev, msgp, msgsz);
-    return 0;
+    int dev, result;
+    
+    dev = open("/dev/ku_ipc_dev", O_RDWR);
+    // dev open error
+    if(dev == -1)
+        return -1;
+    result = write(dev, msgp, msgsz);
+
+    if(result == -1)
+    {
+        if(msgflg & IPC_NOWAIT != 0)
+            return -1;
+        else
+            result = write(dev, msgp, msgsz);
+    }
+
+    return result;
 }
 
 int ku_msgrcv(int msgid, void *msgp, int msgsz, long msgtyp, int msgflg)
 {
-    int dev = open("/dev/ku_ipc_dev", O_RDWR);
-    read(dev, msgp, msgsz);
-    return 0;
+    int dev, result;
+
+    dev = open("/dev/ku_ipc_dev", O_RDWR);
+    // dev open error
+    if(dev == -1)
+        return -1;
+    result = read(dev, msgp, msgsz);
+
+    if(result == -1)
+    {
+        if(msgflg & IPC_NOWAIT != 0)
+            return -1;
+        else
+            result = read(dev, msgp, msgsz);
+    }
+
+    return result;
 }

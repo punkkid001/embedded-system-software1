@@ -31,6 +31,8 @@ static struct cdev *cd_cdev;
 spinlock_t ku_lock;
 dev_t dev_num;
 
+int ku_ipc_volume = 0;
+
 void delay(int sec)
 {
     int i, j;
@@ -86,7 +88,7 @@ static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
         case KU_CHECK:
             // is queue empty
             if(list_empty(&msg_q.list))
-                return 0;
+                return -1;
 
             spin_lock(&ku_lock);
             list_for_each_entry(temp, &msg_q.list, list)
@@ -104,49 +106,60 @@ static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
         case KU_CREAT:
             spin_lock(&ku_lock);
-            
-            temp = (QUEUE*)kmalloc(sizeof(QUEUE), GFP_KERNEL);
-            temp->key = (int)arg;
-            temp->size = 0;
+            if(ku_ipc_volume <= KUIPC_MAXVOL)
+            {
+                temp = (QUEUE*)kmalloc(sizeof(QUEUE), GFP_KERNEL);
+                temp->key = (int)arg;
+                temp->size = 0;
 
-            INIT_LIST_HEAD(&(temp->msg_buf).list);
-            (temp->msg_buf).data = kmalloc(KUIPC_MAXMSG);
+                INIT_LIST_HEAD(&(temp->msg_buf).list);
+                (temp->msg_buf).data = kmalloc(KUIPC_MAXMSG);
 
-            list_add_tail(&temp->list, &msg_q.list);
-            spin_unlock(&ku_lock);
+                list_add_tail(&temp->list, &msg_q.list);
+                ku_ipc_volume++;
+                spin_unlock(&ku_lock);
 
-            printk("[KU_IPC]create queue - %d\n", (int)arg);
-            return arg;
+                printk("[KU_IPC]create queue - %d\n", (int)arg);
+                return arg;
+            }
+
+            // queue volume is full
+            else
+                return -1;
 
         case KU_CLOSE:
             spin_lock(&ku_lock);
 
-            // remove list node (queue)
-            list_for_each_safe(pos, q, &msg_q.list)
+            if(ku_ipc_volume > 0)
             {
-                temp = list_entry(pos, QUEUE, list);
-
-                // success to remove queue
-                if(temp->key == arg)
+                // remove list node (queue)
+                list_for_each_safe(pos, q, &msg_q.list)
                 {
-                    MSGBUF *msg;
-                    struct list_head *ipos, *iq;
+                    temp = list_entry(pos, QUEUE, list);
 
-                    // remove list node (msg_buf)
-                    list_for_each_safe(ipos, iq, &(temp->msg_buf).list)
+                    // success to remove queue
+                    if(temp->key == arg)
                     {
-                        msg = list_entry(ipos, MSGBUF, list);
-                        list_del(ipos);
-                        kfree(msg->data);    // remove msg data
-                        kfree(msg);    // remove msg node
+                        MSGBUF *msg;
+                        struct list_head *ipos, *iq;
+
+                        // remove list node (msg_buf)
+                        list_for_each_safe(ipos, iq, &(temp->msg_buf).list)
+                        {
+                            msg = list_entry(ipos, MSGBUF, list);
+                            list_del(ipos);
+                            kfree(msg->data);    // remove msg data
+                            kfree(msg);    // remove msg node
+                        }
+
+                        list_del(pos);
+                        kfree(temp);    // remove temp node (queue)
+                        ku_ipc_volume--;
+                        spin_unlock(&ku_lock);
+
+                        printk("[KU_IPC]close queue - %d\n", (int)arg);
+                        return 0;
                     }
-
-                    list_del(pos);
-                    kfree(temp);    // remove temp node (queue)
-                    spin_unlock(&ku_lock);
-
-                    printk("[KU_IPC]close queue - %d\n", (int)arg);
-                    return 0;
                 }
             }
 
