@@ -75,7 +75,6 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
                     return size;
                 }
 
-                //else if(user_msg->type > 0 && ((MSGBUF*)(tmp->data))->type == user_msg->type )
                 else if(user_msg->type > 0 && tmp->type == user_msg->type)
                 {
                     if(user_msg->size < sizeof(tmp->data))
@@ -208,7 +207,6 @@ static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
                 INIT_LIST_HEAD(&(temp->msg_buf).list);
                 (temp->msg_buf).data = kmalloc(KUIPC_MAXMSG, GFP_KERNEL);
-
                 /*
                    (temp->msg_buf).id = (int)arg;
                    (temp->msg_buf).size = 0;
