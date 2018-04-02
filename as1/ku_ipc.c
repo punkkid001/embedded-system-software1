@@ -17,15 +17,12 @@
 
 MODULE_LICENSE("GPL");
 
-typedef struct msgbuf
+typedef struct kumsg
 {
     struct list_head list;
-    long type;    // message type
-    int id;    // queue id(key)
-    int size;    // data size
-    int flag;    // message flag
-    void *data;
-} MSGBUF;
+    int id;
+    void *data;    // data type: MSGBUF
+} KUMSG;
 
 typedef struct queue
 {
@@ -33,6 +30,7 @@ typedef struct queue
     MSGBUF msg_buf;    // messages in the queue
     int key;    // queue id(key)
     int size;    // capacity of the queue
+    int count;
 } QUEUE;
 
 QUEUE msg_q;    // root queue
@@ -87,28 +85,32 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
 static int ku_ipc_write(struct file *file, const char *buf, size_t len, loff_t *lof)
 {
     QUEUE *temp = NULL;
-    MSGBUF *msg = NULL;
+    SNDMSG *user_msg = NULL;
+    KUMSG *msg = NULL;
     int size = 0;
 
     if(len >= KUIPC_MAXMSG)
         return -2;    // oversize
 
-    msg = (MSGBUF*)kmalloc(sizeof(MSGBUF), GFP_KERNEL);
-    // msg = kmalloc(len, GFP_KERNEL); : is it okay?
-    if(copy_from_user((void*)msg, (void*)buf, len) > 0)
+    msg = kmalloc(sizeof(KUMSG), GFP_KERNEL);
+    if(copy_from_user(user_msg, buf, len) > 0)
     {
         spin_lock(&ku_lock);
         list_for_each_entry(temp, &msg_q.list, list)
         {
             if(temp->key == msg->id)
             {
-                size = temp->size + msg->size;
-                if(size >= KUIPC_MAXVOL)
+                size = temp->size + user_msg->size;
+                // need to check
+                if((size >= KUIPC_MAXVOL) || (temp->count >= KUIPC_MAXMSG))
                     return -3;    // lack of space
 
+                msg->id = user_msg->id;
+                msg->data = user_msg->data;
                 //msg->type = *((long*)(msg->data));
                 list_add_tail(&msg->list, &(temp->msg_buf).list);
-                temp->size += msg->size;
+                temp->size += user_msg->size;
+                temp->count++;
                 break;
             }
         }
@@ -154,6 +156,7 @@ static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
                 temp = kmalloc(sizeof(QUEUE), GFP_KERNEL);
                 temp->key = (int)arg;
                 temp->size = 0;
+                temp->count = 0;
 
                 INIT_LIST_HEAD(&(temp->msg_buf).list);
                 (temp->msg_buf).data = kmalloc(KUIPC_MAXMSG, GFP_KERNEL);
@@ -267,6 +270,7 @@ static int __init ku_ipc_init(void)
     INIT_LIST_HEAD(&msg_q.list);
     msg_q.key = 0;
     msg_q.size = 0;
+    msg_q.count = 0;
     //msg_q.buf.data = kmalloc(KUIPC_MAXMSG, GFP_KERNEL);
 
     cd_cdev = cdev_alloc();

@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include <unistd.h>
 #include <sys/fcntl.h>
 #include <sys/ioctl.h>
@@ -24,7 +25,7 @@ int ku_msgget(int key, int msgflg)
         switch(msgflg)
         {
             case IPC_CREAT:
-                msqid = ioctl(dev, KU_GET, key);
+                msqid = ioctl(dev, KU_CHECK, key);
                 close(dev);
                 return msqid;
             case IPC_EXCL:
@@ -59,7 +60,7 @@ int ku_msgclose(int msqid)
 // ku_ipc_write
 int ku_msgsnd(int msqid, void *msgp, int msgsz, int msgflg)
 {
-    MSGBUF *msg;
+    SNDMSG *snd_msg;
     int dev, status;
     
     dev = open("/dev/ku_ipc_dev", O_RDWR);
@@ -67,14 +68,12 @@ int ku_msgsnd(int msqid, void *msgp, int msgsz, int msgflg)
     if(dev < 0)
         return -1;
 
-    msg->type = 0;    // is it okay?
-    msg->id = msqid;
-    msg->size = msgsz;
-    msg->flag = msgflg;
-    msg->data = msgp;
+    snd_msg = malloc(sizeof(SNDMSG));
+    snd_msg->id = msqid;
+    snd_msg->size = msgsz;
+    snd_msg->data = msgp;
 
-    // status = write(dev, (char*)msg, sizeof(msg));
-    status = write(dev, msg, sizeof(msg));
+    status = write(dev, snd_msg, sizeof(snd_msg));
 
     if(status < 0)
     {
