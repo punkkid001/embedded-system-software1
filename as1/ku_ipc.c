@@ -13,6 +13,8 @@
 #include <asm/delay.h>
 #include <asm/uaccess.h>
 
+#include <math.h>
+
 #include "ku_ipc.h"
 
 MODULE_LICENSE("GPL");
@@ -45,9 +47,87 @@ int ku_ipc_volume = 0;
 static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
 {
     QUEUE *temp = NULL;
-    MSGBUF *msg = (MSGBUF*)buf, *tmp = NULL;
-    int size = 0;
+    RCVMSG *user_msg = (RCVMSG*)buf;
+    MSGBUF *tmp = NULL, *min = NULL;
+    int count = 0, size = 0, flag = 0;
 
+    spin_lock(&ku_lock);
+    list_for_each_entry(temp, &msg_q.list, list)
+    {
+        if(temp->key == user_msg->id)
+        {
+            list_for_each_entry(tmp, &(temp->msg_buf).list, list)
+            {
+                if(count == 0)
+                    min = tmp;
+
+                if(user_msg->type == 0 && count == 0)
+                {
+                    if(user_msg->size < sizeof(tmp->data))
+                    {
+                        if(user_msg->flag == 0)
+                            size = copy_to_user(user_msg->data, tmp->data, user_msg->size);
+                        else
+                            return -2;
+                    }
+                    else
+                        size = copy_to_user(user_msg->data, tmp->data, sizeof(tmp->data));
+                    spin_unlock(&ku_lock);
+                    return size;
+                }
+
+                else if(user_msg->type > 0 && tmp->type == user_msg->type )
+                {
+                    if(user_msg->size < sizeof(tmp->data))
+                    {
+                        if(user_msg->flag == 0)
+                            size = copy_to_user(user_msg->data, tmp->data, user_msg->size);
+                        else
+                            return -2;
+                    }
+                    else
+                        size = copy_to_user(user_msg->data, tmp->data, sizeof(tmp->data));
+
+                    spin_unlock(&ku_lock);
+                    return size;
+                }
+
+                else if(user_msg->type < 0)
+                {
+                    long type = abs(user_msg->type);
+                    if(tmp->type <= type && min->type > tmp->type)
+                        min = tmp;
+                    flag = 1;
+                }
+
+                count++;
+            }
+
+            if(flag == 1)
+            {
+                if(user_msg->size < sizeof(tmp->data))
+                {
+                    if(user_msg->flag == 0)
+                        size = copy_to_user(user_msg->data, tmp->data, user_msg->size);
+                    else
+                        return -2;
+                }
+                else
+                    size = copy_to_user(user_msg->data, tmp->data, sizeof(tmp->data));
+
+                spin_unlock(&ku_lock);
+                return size;
+            }
+
+            break;
+        }
+    }
+    spin_unlock(&ku_lock);
+
+    return -1;    // fail to read
+}
+
+    /*
     spin_lock(&ku_lock);
     list_for_each_entry(temp, &msg_q.list, list)
     {
@@ -78,6 +158,7 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
 
     spin_unlock(&ku_lock);
     return -1;    // fail to read
+    */
 }
 
 // ku_msgsnd
