@@ -17,19 +17,26 @@
 #define KU_CREAT _IOWR(KU_IOCTL_NUM, IOCTL_NUM1, unsigned long *)
 #define KU_CLOSE _IOWR(KU_IOCTL_NUM, IOCTL_NUM2, unsigned long *)
 #define KU_CHECK _IOWR(KU_IOCTL_NUM, IOCTL_NUM3, unsigned long *)
-#define KU_EMPTY _IOWR(KI_IOCTL_NUM, IOCTL_NUM3, unsigned long *)
+#define KU_EMPTY _IOWR(KU_IOCTL_NUM, IOCTL_NUM4, unsigned long *)
 
 #define DEV_NAME "ku_ipc_dev"
 
-typedef struct msgbuf
+typedef struct sndmsg
 {
-    struct list_head list;
     long type;    // message type
     int id;    // queue id(key)
     int size;    // data size 
+    void *data;
+} SNDMSG;
+
+typedef struct rcvmsg
+{
+    long type;
+    int id;
+    int size;
     int flag;    // message flag
     void *data;
-} MSGBUF;
+}
 
 /*
  * <RETURN VALUE>

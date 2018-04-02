@@ -17,6 +17,16 @@
 
 MODULE_LICENSE("GPL");
 
+typedef struct msgbuf
+{
+    struct list_head list;
+    long type;    // message type
+    int id;    // queue id(key)
+    int size;    // data size
+    int flag;    // message flag
+    void *data;
+} MSGBUF;
+
 typedef struct queue
 {
     struct list_head list;
@@ -34,14 +44,15 @@ dev_t dev_num;
 int ku_ipc_volume = 0;
 
 // ku_msgrcv
-static int ku_ipc_read(struct file *file, const char *buf, size_t len, loff_t *lof)
+static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
 {
-    QUEUE *temp = NULL, *tmp = NULL;
-    MSGBUF *msg = (MSGBUF*)buf;
+    QUEUE *temp = NULL;
+    MSGBUF *msg = (MSGBUF*)buf, *tmp = NULL;
+    int size = 0;
     //struct list_head *pos = NULL, *q = NULL;
 
     spin_lock(&ku_lock);
-    list_for_each_entry(temp, &msgq.list, list)
+    list_for_each_entry(temp, &msg_q.list, list)
     {
         if(temp->key == msg->id)
         {
@@ -77,8 +88,7 @@ static int ku_ipc_write(struct file *file, const char *buf, size_t len, loff_t *
 {
     QUEUE *temp = NULL;
     MSGBUF *msg = NULL;
-    struct list_head *pos, *q;
-    int size = 0, flag = 0;
+    int size = 0;
 
     if(len >= KUIPC_MAXMSG)
         return -2;    // oversize
@@ -88,11 +98,11 @@ static int ku_ipc_write(struct file *file, const char *buf, size_t len, loff_t *
     if(copy_from_user((void*)msg, (void*)buf, len) > 0)
     {
         spin_lock(&ku_lock);
-        list_for_each_entry(temp, &msgq.list, list)
+        list_for_each_entry(temp, &msg_q.list, list)
         {
-            if(temp->key == msg->key)
+            if(temp->key == msg->id)
             {
-                size = temp.size + msg->size;
+                size = temp->size + msg->size;
                 if(size >= KUIPC_MAXVOL)
                     return -3;    // lack of space
 
@@ -103,7 +113,7 @@ static int ku_ipc_write(struct file *file, const char *buf, size_t len, loff_t *
             }
         }
         spin_unlock(&ku_lock);
-        printk("[KU_IPC]write to queue id - %d\n", msg->key);
+        printk("[KU_IPC]write to queue id - %d\n", msg->id);
         return 0;    // success to write
     }
 
@@ -115,7 +125,6 @@ static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
     QUEUE *temp = NULL;
     MSGBUF *user_buf = NULL;
     struct list_head *pos = NULL, *q = NULL;
-    int size = 0;
 
     user_buf = (MSGBUF*)arg;
     switch(cmd)
@@ -134,20 +143,20 @@ static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
                     return -1;
                 }
             }
-
             spin_unlock(&ku_lock);
+
             return 0;
 
         case KU_CREAT:
             if(ku_ipc_volume <= KUIPC_MAXVOL)
             {
                 spin_lock(&ku_lock);
-                temp = (QUEUE*)kmalloc(sizeof(QUEUE), GFP_KERNEL);
+                temp = kmalloc(sizeof(QUEUE), GFP_KERNEL);
                 temp->key = (int)arg;
                 temp->size = 0;
 
                 INIT_LIST_HEAD(&(temp->msg_buf).list);
-                (temp->msg_buf).data = kmalloc(KUIPC_MAXMSG);
+                (temp->msg_buf).data = kmalloc(KUIPC_MAXMSG, GFP_KERNEL);
 
                 /*
                    (temp->msg_buf).id = (int)arg;
@@ -200,19 +209,22 @@ static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
                         return 0;
                     }
                 }
+                spin_unlock(&ku_lock);
+
+                // fail to remove queue (there is no matching key)
+                return -1;
             }
 
-            // fail to remove queue
+            // fail to remove queue (queue is empty)
             return -1;
 
         case KU_EMPTY:
             spin_lock(&ku_lock);
             list_for_each_entry(temp, &msg_q.list, list)
             {
-                if(temp->key == (int)arg)
+                if(temp->key == arg)
                 {
-                    // if(list_empty(&temp->list)
-                    if(list_empty(temp->list))
+                    if(list_empty(&temp->list))
                     {
                         spin_unlock(&ku_lock);
                         return 0;    // queue is empty
@@ -220,7 +232,8 @@ static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
                     break;
                 }
             }
-            spin_unlock(&ku_unlock);
+            spin_unlock(&ku_lock);
+
             return -1;    // queue is not empty
     }
 
@@ -240,11 +253,11 @@ static int ku_ipc_release(struct inode *inode, struct file *file)
 }
 
 struct file_operations ku_ipc_fops = {
+    .read = ku_ipc_read,
+    .write = ku_ipc_write,
     .unlocked_ioctl = ku_ipc_ioctl,
     .open = ku_ipc_open,
-    .release = ku_ipc_release,
-    .read = ku_ipc_read,
-    .write = ku_ipc_write
+    .release = ku_ipc_release
 };
 
 static int __init ku_ipc_init(void)
@@ -254,7 +267,6 @@ static int __init ku_ipc_init(void)
     INIT_LIST_HEAD(&msg_q.list);
     msg_q.key = 0;
     msg_q.size = 0;
-    msg_q.buf = NULL;
     //msg_q.buf.data = kmalloc(KUIPC_MAXMSG, GFP_KERNEL);
 
     cd_cdev = cdev_alloc();
