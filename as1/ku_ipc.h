@@ -1,9 +1,9 @@
 #define KUIPC_MAXMSG 1024
 #define KUIPC_MAXVOL 8192
-#define IPC_CREAT 100
-#define IPC_EXCL 200
-#define IPC_NOWAIT 300
-#define MSG_NOERROR 400
+#define IPC_CREAT 00001000
+#define IPC_EXCL 00002000
+#define IPC_NOWAIT 00004000
+#define MSG_NOERROR 00005000
 
 #define IOCTL_START_NUM 0x80
 #define IOCTL_NUM1 IOCTL_START_NUM+1
@@ -19,14 +19,9 @@
 
 #define DEV_NAME "ku_ipc_dev"
 
-typedef struct msgbuf
-{
-    long type;
-    char text[BUFSIZ];
-} MSGBUF;
-
 typedef struct sndmsg
 {
+    long type;
     int id;    // queue id(key)
     int size;    // data size 
     void *data;

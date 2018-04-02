@@ -72,6 +72,7 @@ int ku_msgsnd(int msqid, void *msgp, int msgsz, int msgflg)
     snd_msg->id = msqid;
     snd_msg->size = msgsz;
     snd_msg->data = msgp;
+    snd_msg->type = ((struct msgbuf*)msgp)->type;
 
     status = write(dev, snd_msg, sizeof(snd_msg));
 

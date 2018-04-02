@@ -13,8 +13,6 @@
 #include <asm/delay.h>
 #include <asm/uaccess.h>
 
-#include <math.h>
-
 #include "ku_ipc.h"
 
 MODULE_LICENSE("GPL");
@@ -22,6 +20,7 @@ MODULE_LICENSE("GPL");
 typedef struct kumsg
 {
     struct list_head list;
+    long type;
     int id;
     void *data;    // data type: MSGBUF
 } KUMSG;
@@ -29,7 +28,7 @@ typedef struct kumsg
 typedef struct queue
 {
     struct list_head list;
-    MSGBUF msg_buf;    // messages in the queue
+    KUMSG msg_buf;    // messages in the queue
     int key;    // queue id(key)
     int size;    // capacity of the queue
     int count;
@@ -47,8 +46,8 @@ int ku_ipc_volume = 0;
 static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
 {
     QUEUE *temp = NULL;
+    KUMSG *tmp = NULL, *min = NULL;
     RCVMSG *user_msg = (RCVMSG*)buf;
-    MSGBUF *tmp = NULL, *min = NULL;
     int count = 0, size = 0, flag = 0;
 
     spin_lock(&ku_lock);
@@ -76,7 +75,8 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
                     return size;
                 }
 
-                else if(user_msg->type > 0 && tmp->type == user_msg->type )
+                //else if(user_msg->type > 0 && ((MSGBUF*)(tmp->data))->type == user_msg->type )
+                else if(user_msg->type > 0 && tmp->type == user_msg->type)
                 {
                     if(user_msg->size < sizeof(tmp->data))
                     {
@@ -94,7 +94,7 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
 
                 else if(user_msg->type < 0)
                 {
-                    long type = abs(user_msg->type);
+                    long type = user_msg->type * (-1);
                     if(tmp->type <= type && min->type > tmp->type)
                         min = tmp;
                     flag = 1;
@@ -127,40 +127,6 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
     return -1;    // fail to read
 }
 
-    /*
-    spin_lock(&ku_lock);
-    list_for_each_entry(temp, &msg_q.list, list)
-    {
-        if(temp->key == msg->id)
-        {
-            list_for_each_entry(tmp, &(temp->msg_buf.list), list)
-            {
-                if(tmp->type == msg->type && tmp->size <= len)
-                {
-                    size = copy_to_user(msg->data, tmp->data, len);
-                    spin_unlock(&ku_lock);
-                    return size;
-                }
-
-                if(msg->flag == 0)
-                {
-                    size = copy_to_user(msg->data, tmp->data, sizeof(tmp->data));
-                    spin_unlock(&ku_lock);
-                    return size;
-                }
-
-                return -2;    // lack of space
-            }
-
-            break;
-        }
-    }
-
-    spin_unlock(&ku_lock);
-    return -1;    // fail to read
-    */
-}
-
 // ku_msgsnd
 static int ku_ipc_write(struct file *file, const char *buf, size_t len, loff_t *lof)
 {
@@ -188,6 +154,7 @@ static int ku_ipc_write(struct file *file, const char *buf, size_t len, loff_t *
                 msg = kmalloc(sizeof(KUMSG), GFP_KERNEL);
                 msg->id = user_msg->id;
                 msg->data = user_msg->data;
+                msg->type = user_msg->type;
                 list_add_tail(&msg->list, &(temp->msg_buf).list);
 
                 temp->size = size;
@@ -208,10 +175,8 @@ static int ku_ipc_write(struct file *file, const char *buf, size_t len, loff_t *
 static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
     QUEUE *temp = NULL;
-    MSGBUF *user_buf = NULL;
     struct list_head *pos = NULL, *q = NULL;
 
-    user_buf = (MSGBUF*)arg;
     switch(cmd)
     {
         case KU_CHECK:
@@ -274,13 +239,13 @@ static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
                     // success to remove queue
                     if(temp->key == arg)
                     {
-                        MSGBUF *msg;
+                        KUMSG *msg;
                         struct list_head *ipos, *iq;
 
                         // remove list node (msg_buf)
                         list_for_each_safe(ipos, iq, &(temp->msg_buf).list)
                         {
-                            msg = list_entry(ipos, MSGBUF, list);
+                            msg = list_entry(ipos, KUMSG, list);
                             list_del(ipos);
                             kfree(msg->data);    // remove msg data
                             kfree(msg);    // remove msg node
