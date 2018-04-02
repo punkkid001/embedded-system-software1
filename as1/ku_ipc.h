@@ -39,7 +39,7 @@ typedef struct rcvmsg
     int size;
     int flag;    // message flag
     void *data;
-}
+} RCVMSG;
 
 /*
  * <RETURN VALUE>

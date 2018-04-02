@@ -47,7 +47,6 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
     QUEUE *temp = NULL;
     MSGBUF *msg = (MSGBUF*)buf, *tmp = NULL;
     int size = 0;
-    //struct list_head *pos = NULL, *q = NULL;
 
     spin_lock(&ku_lock);
     list_for_each_entry(temp, &msg_q.list, list)
@@ -92,29 +91,32 @@ static int ku_ipc_write(struct file *file, const char *buf, size_t len, loff_t *
     if(len >= KUIPC_MAXMSG)
         return -2;    // oversize
 
-    msg = kmalloc(sizeof(KUMSG), GFP_KERNEL);
     if(copy_from_user(user_msg, buf, len) > 0)
     {
         spin_lock(&ku_lock);
         list_for_each_entry(temp, &msg_q.list, list)
         {
-            if(temp->key == msg->id)
+            // find queue
+            if(temp->key == user_msg->id)
             {
                 size = temp->size + user_msg->size;
                 // need to check
                 if((size >= KUIPC_MAXVOL) || (temp->count >= KUIPC_MAXMSG))
                     return -3;    // lack of space
 
+                msg = kmalloc(sizeof(KUMSG), GFP_KERNEL);
                 msg->id = user_msg->id;
                 msg->data = user_msg->data;
-                //msg->type = *((long*)(msg->data));
                 list_add_tail(&msg->list, &(temp->msg_buf).list);
-                temp->size += user_msg->size;
+
+                temp->size = size;
                 temp->count++;
+
                 break;
             }
         }
         spin_unlock(&ku_lock);
+
         printk("[KU_IPC]write to queue id - %d\n", msg->id);
         return 0;    // success to write
     }

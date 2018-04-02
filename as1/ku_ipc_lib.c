@@ -92,8 +92,7 @@ int ku_msgsnd(int msqid, void *msgp, int msgsz, int msgflg)
 // ku_ipc_read
 int ku_msgrcv(int msgid, void *msgp, int msgsz, long msgtyp, int msgflg)
 {
-    MSGBUF *msg = NULL;
-    void *result = NULL;
+    RCVMSG *rcv_msg = NULL;
     int dev, status;
 
     dev = open("/dev/ku_ipc_dev", O_RDWR);
@@ -108,27 +107,23 @@ int ku_msgrcv(int msgid, void *msgp, int msgsz, long msgtyp, int msgflg)
         while(!(status == -1))
             status = ioctl(dev, KU_EMPTY, msgid);
 
-    result = malloc(msgsz);
+    rcv_msg->type = msgtyp;
+    rcv_msg->id = msgid;
+    rcv_msg->size = msgsz;
+    rcv_msg->flag = msgflg;
+    rcv_msg->data = msgp;
 
-    msg->type = msgtyp;
-    msg->id = msgid;
-    msg->size = msgsz;
-    msg->flag = msgflg;
-    msg->data = result;
-    // msg->data = msgp;
-
-    // status = read(dev, (char*)msg, sizeof(msg));
-    status = read(dev, msg, sizeof(msg));
+    status = read(dev, rcv_msg, sizeof(rcv_msg));
 
     // oversize (sizeof(msgq.data) > msgsz)
     if(status == -2)
     {
-        if(msgflg & IPC_NOERROR == 0)
+        if(msgflg & MSG_NOERROR == 0)
             return -1;
         else
         {
-            msg->flag = 0;
-            status = read(dev, msg, sizeof(msg));
+            rcv_msg->flag = 0;
+            status = read(dev, rcv_msg, sizeof(rcv_msg));
         }
     }
 
