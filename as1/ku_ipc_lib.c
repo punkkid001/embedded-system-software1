@@ -5,6 +5,12 @@
 
 #include "ku_ipc.h"
 
+struct msgbuf
+{
+    long mtype;
+    char *mtext;
+};
+
 int ku_msgget(int key, int msgflg);
 int ku_msgclose(int msqid);
 int ku_msgsnd(int msqid, void *msgp, int msgsz, int msgflg);
@@ -72,7 +78,7 @@ int ku_msgsnd(int msqid, void *msgp, int msgsz, int msgflg)
     snd_msg->id = msqid;
     snd_msg->size = msgsz;
     snd_msg->data = msgp;
-    snd_msg->type = ((struct msgbuf*)msgp)->type;
+    snd_msg->type = ((struct msgbuf*)msgp)->mtype;
 
     status = write(dev, snd_msg, sizeof(snd_msg));
 
@@ -108,6 +114,7 @@ int ku_msgrcv(int msgid, void *msgp, int msgsz, long msgtyp, int msgflg)
         while(!(status == -1))
             status = ioctl(dev, KU_EMPTY, msgid);
 
+    rcv_msg = malloc(sizeof(RCVMSG));
     rcv_msg->type = msgtyp;
     rcv_msg->id = msgid;
     rcv_msg->size = msgsz;

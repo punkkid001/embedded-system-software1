@@ -55,6 +55,7 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
     {
         if(temp->key == user_msg->id)
         {
+            /*
             list_for_each_entry(tmp, &(temp->msg_buf).list, list)
             {
                 if(count == 0)
@@ -117,8 +118,10 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
                 spin_unlock(&ku_lock);
                 return size;
             }
-
-            break;
+            */
+            printk("[KU_IPC]Read - %d\n", temp->key);
+            spin_unlock(&ku_lock);
+            return 0;
         }
     }
     spin_unlock(&ku_lock);
@@ -145,6 +148,7 @@ static int ku_ipc_write(struct file *file, const char *buf, size_t len, loff_t *
             // find queue
             if(temp->key == user_msg->id)
             {
+                /*
                 size = temp->size + user_msg->size;
                 // need to check
                 if((size >= KUIPC_MAXVOL) || (temp->count >= KUIPC_MAXMSG))
@@ -158,13 +162,21 @@ static int ku_ipc_write(struct file *file, const char *buf, size_t len, loff_t *
 
                 temp->size = size;
                 temp->count++;
+                */
 
+                msg = kmalloc(sizeof(KUMSG), GFP_KERNEL);
+                msg->id = user_msg->id;
+                msg->data = user_msg->data;
+                msg->type = user_msg->type;
+                list_add_tail(&msg->list, &(temp->msg_buf).list);
+
+                printk("[KU_IPC]Write: %d\n", temp->key);
                 break;
             }
         }
         spin_unlock(&ku_lock);
 
-        printk("[KU_IPC]write to queue id - %d\n", msg->id);
+        printk("[KU_IPC]Write: queue id %ld\n", msg->id);
         return 0;    // success to write
     }
 
@@ -176,15 +188,18 @@ static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
     QUEUE *temp = NULL;
     struct list_head *pos = NULL, *q = NULL;
 
+    printk("[KU_IPC]Ioctl: arg %ld\n", arg);
+
     switch(cmd)
     {
         case KU_CHECK:
-            if(!list_empty(&msg_q.list))
-                return -1;    // queue is not empty
+            if(list_empty(&msg_q.list))
+                return 0;    // queue is empty
 
             spin_lock(&ku_lock);
             list_for_each_entry(temp, &msg_q.list, list)
             {
+                //printk("[KU_IPC]Queue check: id %d\n", temp->key);
                 // duplicated keys are not allowed
                 if(temp->key == (int)arg)
                 {
@@ -201,24 +216,20 @@ static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
             {
                 spin_lock(&ku_lock);
                 temp = kmalloc(sizeof(QUEUE), GFP_KERNEL);
-                temp->key = (int)arg;
+                temp->key = arg;
                 temp->size = 0;
                 temp->count = 0;
 
                 INIT_LIST_HEAD(&(temp->msg_buf).list);
                 (temp->msg_buf).data = kmalloc(KUIPC_MAXMSG, GFP_KERNEL);
-                /*
-                   (temp->msg_buf).id = (int)arg;
-                   (temp->msg_buf).size = 0;
-                   (temp->msg_buf).flag = 0;
-                   (temp->msg_buf).data = NULL;
-                 */
+                (temp->msg_buf).id = arg;
+                (temp->msg_buf).type = -1;
 
                 list_add_tail(&temp->list, &msg_q.list);
                 ku_ipc_volume++;
                 spin_unlock(&ku_lock);
 
-                printk("[KU_IPC]create queue - %d\n", (int)arg);
+                printk("[KU_IPC]Create queue: id %ld\n", arg);
                 return arg;
             }
 
@@ -254,7 +265,7 @@ static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
                         ku_ipc_volume--;
                         spin_unlock(&ku_lock);
 
-                        printk("[KU_IPC]close queue - %d\n", (int)arg);
+                        printk("[KU_IPC]Close queue: id %d\n", (int)arg);
                         return 0;
                     }
                 }
@@ -273,7 +284,7 @@ static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
             {
                 if(temp->key == arg)
                 {
-                    if(list_empty(&temp->list))
+                    if(temp->count == 0)
                     {
                         spin_unlock(&ku_lock);
                         return 0;    // queue is empty
@@ -314,10 +325,10 @@ static int __init ku_ipc_init(void)
     printk("[KU_IPC]Init\n");
 
     INIT_LIST_HEAD(&msg_q.list);
-    msg_q.key = 0;
+    msg_q.key = -1;
     msg_q.size = 0;
     msg_q.count = 0;
-    //msg_q.buf.data = kmalloc(KUIPC_MAXMSG, GFP_KERNEL);
+    msg_q.msg_buf.data = kmalloc(KUIPC_MAXMSG, GFP_KERNEL);
 
     cd_cdev = cdev_alloc();
     alloc_chrdev_region(&dev_num, 0, 1, DEV_NAME);
