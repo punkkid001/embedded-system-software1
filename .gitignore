@@ -1,4 +1,5 @@
 sites
+*.tar
 *.d
 
 # Object files

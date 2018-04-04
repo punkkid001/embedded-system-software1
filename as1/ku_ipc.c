@@ -140,37 +140,38 @@ static int ku_ipc_write(struct file *file, const char *buf, size_t len, loff_t *
     if(len >= KUIPC_MAXMSG)
         return -2;    // oversize
 
-    if(copy_from_user(user_msg, buf, len) > 0)
+    user_msg = (SNDMSG*)kmalloc(sizeof(SNDMSG), GFP_KERNEL);
+    printk("[KU_IPC]Write: len %d\n", len);
+
+    if(!copy_from_user((void*)user_msg, (void*)buf, sizeof(SNDMSG)))
     {
+        printk("[KU_IPC]Write: user_msg->id %d\n", user_msg->id);
+        printk("[KU_IPC]Write: usre_msg->type %d\n", user_msg->type);
+
         spin_lock(&ku_lock);
         list_for_each_entry(temp, &msg_q.list, list)
         {
             // find queue
             if(temp->key == user_msg->id)
             {
-                /*
                 size = temp->size + user_msg->size;
                 // need to check
                 if((size >= KUIPC_MAXVOL) || (temp->count >= KUIPC_MAXMSG))
                     return -3;    // lack of space
 
                 msg = kmalloc(sizeof(KUMSG), GFP_KERNEL);
+                msg->data = kmalloc(KUIPC_MAXMSG, GFP_KERNEL);
+
                 msg->id = user_msg->id;
                 msg->data = user_msg->data;
                 msg->type = user_msg->type;
+
                 list_add_tail(&msg->list, &(temp->msg_buf).list);
 
                 temp->size = size;
                 temp->count++;
-                */
 
-                msg = kmalloc(sizeof(KUMSG), GFP_KERNEL);
-                msg->id = user_msg->id;
-                msg->data = user_msg->data;
-                msg->type = user_msg->type;
-                list_add_tail(&msg->list, &(temp->msg_buf).list);
-
-                printk("[KU_IPC]Write: %d\n", temp->key);
+                kfree(user_msg);
                 break;
             }
         }
@@ -255,8 +256,9 @@ static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
                         list_for_each_safe(ipos, iq, &(temp->msg_buf).list)
                         {
                             msg = list_entry(ipos, KUMSG, list);
+
+                            kfree(&msg->data);    // remove msg data
                             list_del(ipos);
-                            kfree(msg->data);    // remove msg data
                             kfree(msg);    // remove msg node
                         }
 
@@ -265,7 +267,7 @@ static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
                         ku_ipc_volume--;
                         spin_unlock(&ku_lock);
 
-                        printk("[KU_IPC]Close queue: id %d\n", (int)arg);
+                        printk("[KU_IPC]Close queue: id %ld\n", arg);
                         return 0;
                     }
                 }
