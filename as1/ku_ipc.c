@@ -22,6 +22,7 @@ typedef struct kumsg
     struct list_head list;
     long type;
     int id;
+    int size;
     void *data;    // data type: MSGBUF
 } KUMSG;
 
@@ -48,8 +49,8 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
     QUEUE *temp = NULL;
     KUMSG *tmp = NULL, *min = NULL;
     RCVMSG *user_msg = (RCVMSG*)buf;
-    struct list_head *pos = NULL, *q = NULL;
-    int count = 0, size = 0, flag = 0;
+    struct list_head *pos = NULL, *q = NULL, *t_pos = NULL, *t_q = NULL;
+    int count = 0, size = -1, flag = 0;
 
     spin_lock(&ku_lock);
     list_for_each_entry(temp, &msg_q.list, list)
@@ -60,52 +61,35 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
             {
                 tmp = list_entry(pos, KUMSG, list);
 
+                // catch a first node
                 if(count == 0)
                     min = tmp;
 
+                // user wanna get a first message in the queue
                 if(user_msg->type == 0 && count == 0)
-                {
-                    if(user_msg->size < sizeof(tmp->data))
-                    {
-                        if(user_msg->flag == 0)
-                            size = copy_to_user(user_msg->data, tmp->data, user_msg->size);
-                        else
-                            return -2;
-                    }
-                    else
-                        size = copy_to_user(user_msg->data, tmp->data, sizeof(tmp->data));
-                    spin_unlock(&ku_lock);
-                    return size;
-                }
+                    break;
 
-                else if(user_msg->type > 0 && tmp->type == user_msg->type)
-                {
-                    if(user_msg->size < sizeof(tmp->data))
-                    {
-                        if(user_msg->flag == 0)
-                            size = copy_to_user(user_msg->data, tmp->data, user_msg->size);
-                        else
-                            return -2;
-                    }
-                    else
-                        size = copy_to_user(user_msg->data, tmp->data, sizeof(tmp->data));
-
-                    spin_unlock(&ku_lock);
-                    return size;
-                }
+                else if(user_msg->type > 0 && (tmp->type == user_msg->type))
+                    break;
 
                 else if(user_msg->type < 0)
                 {
-                    long type = user_msg->type * (-1);
-                    if(tmp->type <= type && min->type > tmp->type)
+                    long type = user_msg->type * (-1);    // get abs type value
+
+                    // save a node having smallest type value
+                    if((tmp->type <= type) && (min->type > tmp->type))
+                    {
                         min = tmp;
+                        t_pos = pos;
+                        t_q = q;
+                    }
                     flag = 1;
                 }
 
                 count++;
 
                 /*
-                //size = copy_to_user(user_msg->data, tmp->data, user_msg->size);
+                copy_to_user(user_msg->data, tmp->data, user_msg->size);
                 list_del(pos);
                 kfree(tmp);
                 spin_unlock(&ku_lock);
@@ -113,24 +97,79 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
                 */
             }
 
+            // remove a node having smallest type value because of negative type value from user
             if(flag == 1)
             {
-                if(user_msg->size < sizeof(tmp->data))
+                if(tmp->size > user_msg->size)
                 {
-                    if(user_msg->flag == 0)
-                        size = copy_to_user(user_msg->data, tmp->data, user_msg->size);
-                    else
-                        return -2;
+                    if((user_msg->flag & MSG_NOERROR) != 0)
+                    {
+                        if(!copy_to_user(user_msg->data, min->data, user_msg->size))
+                        {
+                            size = user_msg->size;
+
+                            // remove a node
+                            temp->size -= min->size;
+                            temp->count--;
+
+                            list_del(t_pos);
+                            kfree(min);
+                        }
+                    }
+                }
+
+                else
+                {
+                    if(!copy_to_user(user_msg->data, min->data, user_msg->size))
+                    {
+                        size = user_msg->size;
+
+                        temp->size -= min->size;
+                        temp->count--;
+
+                        list_del(t_pos);
+                        kfree(min);
+                    }
+                }
+            }
+
+            else
+            {
+                if(tmp->size > user_msg->size)
+                {
+                    if((user_msg->flag & MSG_NOERROR) != 0)
+                    {
+                        if(!copy_to_user(user_msg->data, tmp->data, user_msg->size))
+                        {
+                            size = user_msg->size;
+
+                            // remove a node
+                            temp->size -= tmp->size;
+                            temp->count--;
+
+                            list_del(pos);
+                            kfree(tmp);
+                        }
+                    }
                 }
                 else
-                    size = copy_to_user(user_msg->data, tmp->data, sizeof(tmp->data));
+                {
+                    if(!copy_to_user(user_msg->data, tmp->data, user_msg->size))
+                    {
+                        size = user_msg->size;
 
-                spin_unlock(&ku_lock);
-                return size;
+                        temp->size -= tmp->size;
+                        temp->count--;
+
+                        list_del(pos);
+                        kfree(tmp);
+                    }
+                }
             }
+
             printk("[KU_IPC]Read - %d\n", temp->key);
             spin_unlock(&ku_lock);
-            return 0;
+            return size;
         }
     }
     spin_unlock(&ku_lock);
@@ -146,16 +185,13 @@ static int ku_ipc_write(struct file *file, const char *buf, size_t len, loff_t *
     KUMSG *msg = NULL;
     int size = 0;
 
-    if(len >= KUIPC_MAXMSG)
-        return -2;    // oversize
-
     user_msg = (SNDMSG*)kmalloc(sizeof(SNDMSG), GFP_KERNEL);
     printk("[KU_IPC]Write: len %d\n", len);
 
     if(!copy_from_user((void*)user_msg, (void*)buf, sizeof(SNDMSG)))
     {
-        printk("[KU_IPC]Write: user_msg->id %d\n", user_msg->id);
-        printk("[KU_IPC]Write: usre_msg->type %d\n", user_msg->type);
+        printk("[KU_IPC]Write: user_msg->id - %d\n", user_msg->id);
+        printk("[KU_IPC]Write: user_msg->type - %ld\n", user_msg->type);
 
         spin_lock(&ku_lock);
         list_for_each_entry(temp, &msg_q.list, list)
@@ -166,7 +202,7 @@ static int ku_ipc_write(struct file *file, const char *buf, size_t len, loff_t *
                 size = temp->size + user_msg->size;
                 // need to check
                 if((size >= KUIPC_MAXVOL) || (temp->count >= KUIPC_MAXMSG))
-                    return -3;    // lack of space
+                    return -2;    // lack of space
 
                 msg = kmalloc(sizeof(KUMSG), GFP_KERNEL);
                 msg->data = kmalloc(KUIPC_MAXMSG, GFP_KERNEL);
@@ -174,6 +210,7 @@ static int ku_ipc_write(struct file *file, const char *buf, size_t len, loff_t *
                 msg->id = user_msg->id;
                 msg->data = user_msg->data;
                 msg->type = user_msg->type;
+                msg->size = user_msg->size;
 
                 list_add_tail(&msg->list, &(temp->msg_buf).list);
 
@@ -186,7 +223,7 @@ static int ku_ipc_write(struct file *file, const char *buf, size_t len, loff_t *
         }
         spin_unlock(&ku_lock);
 
-        printk("[KU_IPC]Write: queue id %ld\n", msg->id);
+        printk("[KU_IPC]Write: queue id %d\n", msg->id);
         return 0;    // success to write
     }
 
@@ -209,7 +246,6 @@ static long ku_ipc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
             spin_lock(&ku_lock);
             list_for_each_entry(temp, &msg_q.list, list)
             {
-                //printk("[KU_IPC]Queue check: id %d\n", temp->key);
                 // duplicated keys are not allowed
                 if(temp->key == (int)arg)
                 {
