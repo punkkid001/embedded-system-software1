@@ -67,10 +67,69 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
 
                 // user wanna get a first message in the queue
                 if(user_msg->type == 0 && count == 0)
-                    break;
+                {
+                    if(tmp->size > user_msg->size)
+                    {
+                        if((user_msg->flag & MSG_NOERROR) != 0)
+                        {
+                            if(!copy_to_user(user_msg->data, tmp->data, user_msg->size))
+                            {
+                                size = user_msg->size;
+                                temp->size -= tmp->size;
+                                temp->count--;
+                                list_del(pos);
+                                kfree(tmp);
+                                break;
+                            }
+                        }
+                    }
+
+                    else
+                    {
+                        if(!copy_to_user(user_msg->data, tmp->data, user_msg->size))
+                        {
+                            printk("1\n");
+                            size = user_msg->size;
+                            temp->size -= tmp->size;
+                            temp->count--;
+                            list_del(pos);
+                            kfree(tmp);
+                            break;
+                        }
+                    }
+                }
 
                 else if(user_msg->type > 0 && (tmp->type == user_msg->type))
-                    break;
+                {
+                    if(tmp->size > user_msg->size)
+                    {
+                        if((user_msg->flag & MSG_NOERROR) != 0)
+                        {
+                            if(!copy_to_user(user_msg->data, tmp->data, user_msg->size))
+                            {
+                                size = user_msg->size;
+                                temp->size -= tmp->size;
+                                temp->count--;
+                                list_del(pos);
+                                kfree(tmp);
+                                break;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        if(!copy_to_user(user_msg->data, tmp->data, user_msg->size))
+                        {
+                            printk("3\n");
+                            size = user_msg->size;
+                            temp->size -= tmp->size;
+                            temp->count--;
+                            list_del(pos);
+                            kfree(tmp);
+                            break;
+                        }
+                    }
+                }
 
                 else if(user_msg->type < 0)
                 {
@@ -87,82 +146,42 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
                 }
 
                 count++;
-
-                /*
-                copy_to_user(user_msg->data, tmp->data, user_msg->size);
-                list_del(pos);
-                kfree(tmp);
-                spin_unlock(&ku_lock);
-                return size;
-                */
             }
 
             // remove a node having smallest type value because of negative type value from user
             if(flag == 1)
             {
-                if(tmp->size > user_msg->size)
+                list_for_each_safe(pos, q, &(temp->msg_buf).list)
                 {
-                    if((user_msg->flag & MSG_NOERROR) != 0)
+                    tmp = list_entry(pos, KUMSG, list);
+                    if(tmp == min)
                     {
-                        if(!copy_to_user(user_msg->data, min->data, user_msg->size))
+                        if(tmp->size > user_msg->size)
                         {
-                            size = user_msg->size;
-
-                            // remove a node
-                            temp->size -= min->size;
-                            temp->count--;
-
-                            list_del(t_pos);
-                            kfree(min);
+                            if((user_msg->flag & MSG_NOERROR) != 0)
+                            {
+                                if(!copy_to_user(user_msg->data, tmp->data, user_msg->size))
+                                {
+                                    size = user_msg->size;
+                                    temp->size -= tmp->size;
+                                    temp->count--;
+                                    list_del(pos);
+                                    kfree(tmp);
+                                }
+                            }
                         }
-                    }
-                }
-
-                else
-                {
-                    if(!copy_to_user(user_msg->data, min->data, user_msg->size))
-                    {
-                        size = user_msg->size;
-
-                        temp->size -= min->size;
-                        temp->count--;
-
-                        list_del(t_pos);
-                        kfree(min);
-                    }
-                }
-            }
-
-            else
-            {
-                if(tmp->size > user_msg->size)
-                {
-                    if((user_msg->flag & MSG_NOERROR) != 0)
-                    {
-                        if(!copy_to_user(user_msg->data, tmp->data, user_msg->size))
+                        else
                         {
-                            size = user_msg->size;
-
-                            // remove a node
-                            temp->size -= tmp->size;
-                            temp->count--;
-
-                            list_del(pos);
-                            kfree(tmp);
+                            if(!copy_to_user(user_msg->data, tmp->data, user_msg->size))
+                            {
+                                printk("4\n");
+                                size = user_msg->size;
+                                temp->size -= tmp->size;
+                                temp->count--;
+                                list_del(pos);
+                                kfree(tmp);
+                            }
                         }
-                    }
-                }
-                else
-                {
-                    if(!copy_to_user(user_msg->data, tmp->data, user_msg->size))
-                    {
-                        size = user_msg->size;
-
-                        temp->size -= tmp->size;
-                        temp->count--;
-
-                        list_del(pos);
-                        kfree(tmp);
                     }
                 }
             }
