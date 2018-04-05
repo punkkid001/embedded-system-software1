@@ -48,6 +48,7 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
     QUEUE *temp = NULL;
     KUMSG *tmp = NULL, *min = NULL;
     RCVMSG *user_msg = (RCVMSG*)buf;
+    struct list_head *pos = NULL, *q = NULL;
     int count = 0, size = 0, flag = 0;
 
     spin_lock(&ku_lock);
@@ -55,9 +56,10 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
     {
         if(temp->key == user_msg->id)
         {
-            /*
-            list_for_each_entry(tmp, &(temp->msg_buf).list, list)
+            list_for_each_safe(pos, q, &(temp->msg_buf).list)
             {
+                tmp = list_entry(pos, KUMSG, list);
+
                 if(count == 0)
                     min = tmp;
 
@@ -101,6 +103,14 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
                 }
 
                 count++;
+
+                /*
+                //size = copy_to_user(user_msg->data, tmp->data, user_msg->size);
+                list_del(pos);
+                kfree(tmp);
+                spin_unlock(&ku_lock);
+                return size;
+                */
             }
 
             if(flag == 1)
@@ -118,7 +128,6 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
                 spin_unlock(&ku_lock);
                 return size;
             }
-            */
             printk("[KU_IPC]Read - %d\n", temp->key);
             spin_unlock(&ku_lock);
             return 0;
