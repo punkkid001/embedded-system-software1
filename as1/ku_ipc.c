@@ -167,7 +167,7 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
                 }
             }
 
-            printk("[KU_IPC]Read - %d\n", size);
+            printk("[KU_IPC]Read: %d\n", size);
             spin_unlock(&ku_lock);
             return size;
         }
