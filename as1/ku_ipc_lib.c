@@ -84,14 +84,21 @@ int ku_msgsnd(int msqid, void *msgp, int msgsz, int msgflg)
     if(status < 0)
     {
         if(status == -3 && (msgflg & IPC_NOWAIT) != 0)
+        {
+            close(dev);
             return -1;
+        }
         else if(status == -3 && (msgflg & IPC_NOWAIT) == 0)
             while(status != 0)
                 status = write(dev, &snd, sizeof(snd));
         else
+        {
+            close(dev);
             return -1;
+        }
     }
 
+    close(dev);
     return 0;
 }
 
@@ -108,7 +115,10 @@ int ku_msgrcv(int msgid, void *msgp, int msgsz, long msgtyp, int msgflg)
 
     status = ioctl(dev, KU_EMPTY, msgid);
     if(status == 0 && (msgflg & IPC_NOWAIT) != 0)
+    {
+        close(dev);
         return -1;
+    }
     else
         while(!(status == -1))
             status = ioctl(dev, KU_EMPTY, msgid);
@@ -121,5 +131,6 @@ int ku_msgrcv(int msgid, void *msgp, int msgsz, long msgtyp, int msgflg)
 
     status = read(dev, &rcv, sizeof(rcv));
 
+    close(dev);
     return status;
 }
