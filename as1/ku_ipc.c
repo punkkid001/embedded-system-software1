@@ -70,7 +70,7 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
                 {
                     if(tmp->size > user_msg->size)
                     {
-                        if((user_msg->flag & MSG_NOERROR) != 0)
+                        if((user_msg->flag & MSG_NOERROR) == MSG_NOERROR)
                         {
                             if(!copy_to_user(user_msg->data, tmp->data, user_msg->size))
                             {
@@ -88,7 +88,7 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
                     {
                         if(!copy_to_user(user_msg->data, tmp->data, user_msg->size))
                         {
-                            printk("1\n");
+                            //printk("1\n");
                             size = user_msg->size;
                             temp->size -= tmp->size;
                             temp->count--;
@@ -103,7 +103,7 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
                 {
                     if(tmp->size > user_msg->size)
                     {
-                        if((user_msg->flag & MSG_NOERROR) != 0)
+                        if((user_msg->flag & MSG_NOERROR) == MSG_NOERROR)
                         {
                             if(!copy_to_user(user_msg->data, tmp->data, user_msg->size))
                             {
@@ -120,7 +120,7 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
                     {
                         if(!copy_to_user(user_msg->data, tmp->data, user_msg->size))
                         {
-                            printk("3\n");
+                            //printk("3\n");
                             size = user_msg->size;
                             temp->size -= tmp->size;
                             temp->count--;
@@ -158,7 +158,7 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
                     {
                         if(tmp->size > user_msg->size)
                         {
-                            if((user_msg->flag & MSG_NOERROR) != 0)
+                            if((user_msg->flag & MSG_NOERROR) == MSG_NOERROR)
                             {
                                 if(!copy_to_user(user_msg->data, tmp->data, user_msg->size))
                                 {
@@ -174,7 +174,7 @@ static int ku_ipc_read(struct file *file, char *buf, size_t len, loff_t *lof)
                         {
                             if(!copy_to_user(user_msg->data, tmp->data, user_msg->size))
                             {
-                                printk("4\n");
+                                //printk("4\n");
                                 size = user_msg->size;
                                 temp->size -= tmp->size;
                                 temp->count--;
@@ -406,7 +406,37 @@ static int __init ku_ipc_init(void)
 
 static void __exit ku_ipc_exit(void)
 {
+    QUEUE *temp = NULL;
+    struct list_head *pos = NULL, *q = NULL;
+
     printk("[KU_IPC]Exit\n");
+
+    if(ku_ipc_volume > 0)
+    {
+        spin_lock(&ku_lock);
+        // remove list node
+        list_for_each_safe(pos, q, &msg_q.list)
+        {
+            KUMSG *msg;
+            struct list_head *ipos = NULL, *iq = NULL;
+
+            temp = list_entry(pos, QUEUE, list);
+
+            // remove list node
+            list_for_each_safe(ipos, iq, &(temp->msg_buf).list)
+            {
+                msg = list_entry(ipos, KUMSG, list);
+
+                kfree(&msg->data);
+                list_del(ipos);
+                kfree(msg);
+            }
+
+            list_del(pos);
+            kfree(temp);
+        }
+        temp = NULL;
+    }
 
     cdev_del(cd_cdev);
     unregister_chrdev_region(dev_num, 1);
