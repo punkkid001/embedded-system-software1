@@ -3,18 +3,7 @@
 #include <sys/fcntl.h>
 #include <sys/ioctl.h>
 
-#include "ku_ipc.h"
-
-struct msgbuf
-{
-    long mtype;
-    char *mtext;
-};
-
-int ku_msgget(int key, int msgflg);
-int ku_msgclose(int msqid);
-int ku_msgsnd(int msqid, void *msgp, int msgsz, int msgflg);
-int ku_msgrcv(int msqid, void *msgp, int msgsz, long msgtyp, int msgflg);
+#include "ku_pir.h"
 
 int ku_pir_open();
 int ku_pir_close(int fd);
@@ -22,121 +11,44 @@ void ku_pir_read(int fd, struct ku_pir_data *data);
 void ku_pir_flush(int fd);
 int ku_pir_insertData(int fd, long unsigned int ts, char rf_flag);
 
-int ku_msgget(int key, int msgflg)
+int ku_pir_open()
 {
-    int dev, msqid;
+    int fd;
     
-    dev= open("/dev/ku_ipc_dev", O_RDWR);
-    // dev open error
-    if(dev < 0)
+    fd = open("/dev/ku_pir_dev", O_RDWR);
+    if(fd < 0)
         return -1;
 
-    msqid = ioctl(dev, KU_CHECK, key);
-    if(msqid == -1)
-    {
-        switch(msgflg)
-        {
-            case IPC_CREAT:
-                close(dev);
-                return key;
-            case IPC_EXCL:
-                close(dev);
-                return -1;
-        }
-
-        return -1;
-    }
-
-    else
-    {
-        msqid = ioctl(dev, KU_CREAT, key);
-        close(dev);
-        return msqid;
-    }
+    return fd;
 }
 
-int ku_msgclose(int msqid)
+int ku_pir_close(int fd)
 {
-    int dev, status;
-
-    dev = open("/dev/ku_ipc_dev", O_RDWR);
-    // dev open error
-    if(dev < 0)
+    close(fd);
+    if(fd < 0)
         return -1;
-
-    status = ioctl(dev, KU_CLOSE, msqid);
-    close(dev);
-    return status;
-}
-
-// ku_ipc_write
-int ku_msgsnd(int msqid, void *msgp, int msgsz, int msgflg)
-{
-    SNDMSG snd;
-    int dev, status;
-    
-    dev = open("/dev/ku_ipc_dev", O_RDWR);
-    // dev open error
-    if(dev < 0)
-        return -1;
-
-    snd.id = msqid;
-    snd.size = msgsz;
-    snd.data = msgp;
-    snd.type = ((struct msgbuf*)msgp)->mtype;
-
-    status = write(dev, &snd, sizeof(snd));
-
-    if(status < 0)
-    {
-        if(status == -2 && (msgflg & IPC_NOWAIT) == IPC_NOWAIT)
-        {
-            close(dev);
-            return -1;
-        }
-        else if(status == -2 && (msgflg & IPC_NOWAIT) != IPC_NOWAIT)
-            while(status != 0)
-                status = write(dev, &snd, sizeof(snd));
-        else
-        {
-            close(dev);
-            return -1;
-        }
-    }
-
-    close(dev);
     return 0;
 }
 
-// ku_ipc_read
-int ku_msgrcv(int msgid, void *msgp, int msgsz, long msgtyp, int msgflg)
+void ku_pir_read(int fd, struct ku_pir_data *data)
 {
-    RCVMSG rcv;
-    int dev, status;
+    // using blocking
+    read(fd, data, sizeof(data));
+}
 
-    dev = open("/dev/ku_ipc_dev", O_RDWR);
-    // dev open error
-    if(dev < 0)
-        return -1;
 
-    status = ioctl(dev, KU_EMPTY, msgid);
-    if(status == 0 && (msgflg & IPC_NOWAIT) == IPC_NOWAIT)
-    {
-        close(dev);
-        return -1;
-    }
-    else
-        while(!(status == -1))
-            status = ioctl(dev, KU_EMPTY, msgid);
+void ku_pir_flush(int fd)
+{
+    ioctl(fd, KU_FLUSH, 0);
+}
 
-    rcv.type = msgtyp;
-    rcv.id = msgid;
-    rcv.size = msgsz;
-    rcv.flag = msgflg;
-    rcv.data = msgp;
+int ku_pir_insertData(int fd, long unsigned int ts, char rf_flag)
+{
+    int status;
+    struct ku_pir_data data;
+    data.timestamp = ts;
+    data.rf_flag = rf_flag;
 
-    status = read(dev, &rcv, sizeof(rcv));
-
-    close(dev);
+    status = write(fd, &data, sizeof(data));
     return status;
 }
