@@ -11,7 +11,8 @@
 
 MODULE_LICENSE("GPL");
 
-struct ku_pir_list {
+struct ku_pir_list
+{
     struct list_head list;
     struct ku_pir_data data;
 };
@@ -39,24 +40,29 @@ static int ku_pir_release(struct inode *inode, struct file *file)
 
 static int ku_pir_read(struct file *file, char *buf, size_t len, loff_t *loff)
 {
-    int ret = 0;
-    struct ku_pir_data data;
+    int fd = -1;
+    struct ku_pir_capsule *user_data = (struct ku_pir_capsule*)buf;
     struct ku_pir_list *pos = NULL;
 
-    rcu_read_lock();
-    list_for_each_entry_rcu(pos, &ku_list[fd].list, list)
-    {
-        if(pos->data.timestamp > 0)
-        {
-            if(copy_to_user(buf, &pos->data, sizeof(struct ku_pir_data)))
-                return -1;
-            return 0;
-        }
-    }
-    rcu_read_unlock();
-    wait_event(wq, 1);
+    fd = user_data->fd;
 
-    printk("[KU_PIR] Read: len %d\n", len);
+    while(1)
+    {
+        rcu_read_lock();
+        list_for_each_entry_rcu(pos, &ku_list[fd].list, list)
+        {
+            if(pos->data.timestamp > 0)
+            {
+                if(copy_to_user(user_data->data, pos->data, sizeof(struct ku_pir_data)))
+                    return -1;
+                break;
+            }
+        }
+        rcu_read_unlock();
+        wait_event(wq, 1);
+    }
+
+    printk("[KU_PIR] Read - fd %d\n", fd);
 
     return 0;
 }
@@ -78,7 +84,7 @@ static int ku_pir_write(struct file *file, char *buf, size_t len, loff_t *loff)
     item->data.timestamp = user_data->data->timestamp;
     item->data.rf_flag = user_data->data->rf_flag;
 
-    printk("[KU_PIR] Write to fd: %d\n", fd);
+    printk("[KU_PIR] Write - fd %d\n", fd);
 
     if(ku_pir_volume[fd] == KUPIR_MAX_MSG)
     {
@@ -104,12 +110,24 @@ static long ku_pir_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
     int i = 0, fd = -1;
     struct ku_pir_list *pos = NULL, *q = NULL;
 
-    printk("[KU_PIR] Ioctl: arg %ld\n", arg);
+    printk("[KU_PIR] Ioctl - arg %ld\n", arg);
 
     switch(cmd)
     {
         case KU_FLUSH:
+            fd = arg - 1;
+
+            list_for_each_entry_safe(pos, q, &ku_list[fd].list, list)
+            {
+                list_del_rcu(&pos->list);
+                kfree(pos);
+            }
+
+            INIT_LIST_HEAD(&ku_list[fd]);
+            ku_pir_volume[fd] = 0;
+
             return 1;
+
         case KU_OPEN:
             // Find empty id
             for(i=0; i<KUPIR_MAX_DEV; i++)
@@ -126,6 +144,7 @@ static long ku_pir_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
             ku_pir_volume[fd-1] = 0;
 
             return fd;
+
         case KU_CLOSE:
             fd = arg - 1;
             fd_list[fd] = 0;
@@ -163,7 +182,7 @@ static irqreturn_t ku_pir_isr(int irq, void *dev)
     else if(gpio_get_value(KUPIR_SENSOR) == 1)
         item->data.rf_flag = 0;
 
-    // Push to queue
+    // Push to queue(linked list)
     for(fd=0; fd<KUPIR_MAX_DEV; fd++)
     {
         if(fd_list[fd] == 1)

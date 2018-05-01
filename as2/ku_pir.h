@@ -17,7 +17,7 @@
 struct ku_pir_data
 {
     long unsigned int timestamp;
-    char rf_flag;
+    char rf_flag;    // 0: RISING, 1: FALLING
 };
 
 struct ku_pir_capsule
