@@ -17,8 +17,8 @@ struct ku_pir_list {
 };
 
 dev_t dev_num;
-int ku_pir_volume;
-struct ku_pir_list ku_list;
+int ku_pir_volume[KUPIR_MAX_DEV] = {0, }, fd_list[KUPIR_MAX_DEV] = {0, };
+struct ku_pir_list ku_list[KUPIR_MAX_DEV];
 
 static int irq_num;
 wait_queue_head_t wq;
@@ -39,24 +39,106 @@ static int ku_pir_release(struct inode *inode, struct file *file)
 
 static int ku_pir_read(struct file *file, char *buf, size_t len, loff_t *loff)
 {
+    int ret = 0;
+    struct ku_pir_data data;
+    struct ku_pir_list *pos = NULL;
+
+    rcu_read_lock();
+    list_for_each_entry_rcu(pos, &ku_list[fd].list, list)
+    {
+        if(pos->data.timestamp > 0)
+        {
+            if(copy_to_user(buf, &pos->data, sizeof(struct ku_pir_data)))
+                return -1;
+            return 0;
+        }
+    }
+    rcu_read_unlock();
+    wait_event(wq, 1);
+
     printk("[KU_PIR] Read: len %d\n", len);
+
     return 0;
 }
 
 static int ku_pir_write(struct file *file, char *buf, size_t len, loff_t *loff)
 {
-    printk("[KU_PIR] Write: len %d\n", len);
+    int fd = -1;
+    struct ku_pir_capsule *user_data = NULL;
+    struct ku_pir_list *item = NULL, *pos = NULL, *q = NULL;
+
+    user_data = kmalloc(sizeof(struct ku_pir_capsule), GFP_ATOMIC);
+    if(copy_from_user(user_data, buf, len))
+        return -1;
+    fd = user_data->fd - 1;
+
+    item = kmalloc(sizeof(struct ku_pir_list), GFP_ATOMIC);
+    if(item == NULL)
+        return -1;
+    item->data.timestamp = user_data->data->timestamp;
+    item->data.rf_flag = user_data->data->rf_flag;
+
+    printk("[KU_PIR] Write to fd: %d\n", fd);
+
+    if(ku_pir_volume[fd] == KUPIR_MAX_MSG)
+    {
+        list_for_each_entry_safe(pos, q, &ku_list[fd].list, list)
+        {
+            list_del_rcu(&pos->list);
+            kfree(pos);
+            ku_pir_volume[fd]--;
+            break;
+        }
+    }
+
+    list_add_tail_rcu(&item->list, &ku_list[fd].list);
+    ku_pir_volime[fd]++;
+
+    wake_up(&wq);
+
     return 0;
 }
 
 static long ku_pir_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
+    int i = 0, fd = -1;
+    struct ku_pir_list *pos = NULL, *q = NULL;
+
     printk("[KU_PIR] Ioctl: arg %ld\n", arg);
 
     switch(cmd)
     {
         case KU_FLUSH:
-            break;
+            return 1;
+        case KU_OPEN:
+            // Find empty id
+            for(i=0; i<KUPIR_MAX_DEV; i++)
+            {
+                if(fd_list[i] == 0)
+                {
+                    fd_list[i] = 1;
+                    fd = i + 1;
+                    break;
+                }
+            }
+
+            INIT_LIST_HEAD(&ku_list[fd-1]);
+            ku_pir_volume[fd-1] = 0;
+
+            return fd;
+        case KU_CLOSE:
+            fd = arg - 1;
+            fd_list[fd] = 0;
+
+            list_for_each_entry_safe(pos, q, &ku_list[fd].list, list)
+            {
+                list_del_rcu(&pos->list);
+                kfree(pos);
+            }
+
+            ku_pir_volume[fd] = 0;
+
+            return 1;
     }
 
     return 0;
@@ -64,12 +146,15 @@ static long ku_pir_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 static irqreturn_t ku_pir_isr(int irq, void *dev)
 {
-    struct ku_pir_list *item = NULL, *tmp = NULL;
-    struct list_head *pos = NULL, *q = NULL;
+    int fd;
+    struct ku_pir_list *item = NULL, *pos = NULL, *q = NULL;
 
     item = kmalloc(sizeof(struct ku_pir_list), GFP_ATOMIC);
+    /*
+    if(item == NULL)
+        return -1;
+    */
     item->data.timestamp = jiffies;
-    item->data.rf_flag = 10;
 
     printk("[KU_PIR] Detect\n");
 
@@ -78,23 +163,29 @@ static irqreturn_t ku_pir_isr(int irq, void *dev)
     else if(gpio_get_value(KUPIR_SENSOR) == 1)
         item->data.rf_flag = 0;
 
-    // NEED TO CHECK
-    if(ku_pir_volume == KUPIR_MAX_MSG)
+    // Push to queue
+    for(fd=0; fd<KUPIR_MAX_DEV; fd++)
     {
-        list_for_each_safe(pos, q, &ku_list.list)
+        if(fd_list[fd] == 1)
         {
-            tmp = list_entry(pos, struct ku_pir_list, list);
-            list_del(pos);
-            kfree(tmp);
+            if(ku_pir_volume[fd] == KUPIR_MAX_MSG)
+            {
+                list_for_each_entry_safe(pos, q, &ku_list[fd].list, list)
+                {
+                    list_del_rcu(&pos->list);
+                    kfree(pos);
+                    ku_pir_volume[fd]--;
+                    break;
+                }
+            }
+
+            list_add_tail_rcu(&item->list, &ku_list[fd].list);
+            ku_pir_volume[fd]++;
         }
     }
-    
-    // NEED TO CHECK
-    list_add_tail(&ku_list.list, &(item->list));
 
-    ku_pir_volume++;
+    wake_up(&wq);
 
-    //wake_up(&wq);
     return IRQ_HANDLED;
 }
 
@@ -109,7 +200,7 @@ struct file_operations ku_pir_fops =
 
 static int __init ku_pir_init(void)
 {
-    int ret;
+    int fd, ret;
     printk("[KU_PIR] Init\n");
 
     // Init character device
@@ -133,34 +224,27 @@ static int __init ku_pir_init(void)
     // Init waitqueue
     init_waitqueue_head(&wq);
     // Init list
-    INIT_LIST_HEAD(&ku_list);
-    ku_pir_volume = 0;
+    for(fd=0; fd<KUPIR_MAX_DEV; fd++)
+        INIT_LIST_HEAD(&ku_list[fd]);
 
     return 0;
 }
 
 static void __exit ku_pir_exit(void)
 {
-    struct ku_pir_list *tmp = NULL;
-    struct list_head *pos = NULL, *q = NULL;
+    int fd;
+    struct ku_pir_list *pos = NULL, *q = NULL;
 
     printk("[KU_PIR] Exit\n");
 
     // Remove list
-    /*
-    list_for_each_entry_safe(pos, q, &(ku_list.list), list)
+    for(fd=0; fd<KUPIR_MAX_DEV; fd++)
     {
-        list_del_rcu(&(pos->list));
-        kfree(pos);
-    }
-    */
-
-    // NEED TO CHECK
-    list_for_each_safe(pos, q, &ku_list.list)
-    {
-        tmp = list_entry(pos, struct ku_pir_list, list);
-        list_del(pos);
-        kfree(tmp);
+        list_for_each_entry_safe(pos, q, &(ku_list[fd].list), list)
+        {
+            list_del_rcu(&pos->list);
+            kfree(pos);
+        }
     }
     
     cdev_del(cd_cdev);
