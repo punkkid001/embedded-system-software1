@@ -44,7 +44,7 @@ static int ku_pir_release(struct inode *inode, struct file *file)
 static int ku_pir_read(struct file *file, char *buf, size_t len, loff_t *lof)
 {
     int fd = -1, ret = 0;
-    struct ku_pir_capsule *user_data = (struct ku_pir_capsule*)buf;
+    struct ku_pir_capsule *user_data = (struct ku_pir_capsule *)buf;
     struct ku_pir_list *pos = NULL, *q = NULL;
 
     fd = user_data->fd - 1;
@@ -52,7 +52,7 @@ static int ku_pir_read(struct file *file, char *buf, size_t len, loff_t *lof)
 
     // If queue is empty
     if(ku_pir_volume[fd] == 0)
-        wait_event(wq, ku_pir_volume[fd] > 0);
+        wait_event_interruptible(wq, ku_pir_volume[fd] > 0);
 
     // Read data
     rcu_read_lock();
@@ -66,12 +66,15 @@ static int ku_pir_read(struct file *file, char *buf, size_t len, loff_t *lof)
     rcu_read_unlock();
 
     // Remove data
-    list_for_each_entry_safe(pos, q, &ku_list[fd].list, list)
+    if(ret != -1)
     {
-        list_del_rcu(&pos->list);
-        kfree(pos);
-        ku_pir_volume[fd]--;
-        break;
+        list_for_each_entry_safe(pos, q, &ku_list[fd].list, list)
+        {
+            list_del_rcu(&pos->list);
+            kfree(pos);
+            ku_pir_volume[fd]--;
+            break;
+        }
     }
 
     return ret;
@@ -83,7 +86,7 @@ static int ku_pir_write(struct file *file, const char *buf, size_t len, loff_t *
     struct ku_pir_capsule *user_data = NULL;
     struct ku_pir_list *item = NULL, *pos = NULL, *q = NULL;
 
-    user_data = kmalloc(sizeof(struct ku_pir_capsule), GFP_ATOMIC);
+    user_data = kmalloc(sizeof(struct ku_pir_capsule), GFP_KERNEL);
     if(copy_from_user(user_data, buf, len))
         return -1;
     fd = user_data->fd - 1;
@@ -111,7 +114,8 @@ static int ku_pir_write(struct file *file, const char *buf, size_t len, loff_t *
     list_add_tail_rcu(&item->list, &ku_list[fd].list);
     ku_pir_volume[fd]++;
 
-    wake_up(&wq);
+    wake_up_interruptible(&wq);
+    kfree(user_data);
 
     return 0;
 }
@@ -172,7 +176,7 @@ static long ku_pir_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
             ku_pir_volume[fd] = 0;
 
             return 1;
-        
+
         case KU_PRINT:
             for(fd=0; fd<KUPIR_MAX_DEV; fd++)
             {
@@ -200,10 +204,8 @@ static irqreturn_t ku_pir_isr(int irq, void *dev)
     struct ku_pir_list *item = NULL, *pos = NULL, *q = NULL;
 
     item = kmalloc(sizeof(struct ku_pir_list), GFP_ATOMIC);
-    /*
     if(item == NULL)
-        return -1;
-    */
+        return IRQ_NONE;
     item->data.timestamp = jiffies;
 
     printk("[KU_PIR] Detect\n");
@@ -213,7 +215,7 @@ static irqreturn_t ku_pir_isr(int irq, void *dev)
     else if(gpio_get_value(KUPIR_SENSOR) == 1)
         item->data.rf_flag = 0;
     else
-        item->data.rf_flag = -1;
+        return IRQ_NONE;
 
     // Push to queue(linked list)
     for(fd=0; fd<KUPIR_MAX_DEV; fd++)
@@ -237,7 +239,7 @@ static irqreturn_t ku_pir_isr(int irq, void *dev)
         }
     }
 
-    wake_up(&wq);
+    wake_up_interruptible(&wq);
 
     return IRQ_HANDLED;
 }

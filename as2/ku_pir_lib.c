@@ -52,7 +52,7 @@ void ku_pir_read(int fd, struct ku_pir_data *data)
     capsule.data = data;
 
     // using blocking
-    read(dev, &capsule, sizeof(struct ku_pir_capsule));
+    read(dev, (char*)&capsule, sizeof(struct ku_pir_capsule));
 
     close(dev);
 }
@@ -86,7 +86,7 @@ int ku_pir_insertData(int fd, long unsigned int ts, char rf_flag)
     if(dev < 0)
         return -1;
 
-    status = write(dev, (char*)&capsule, sizeof(capsule));
+    status = write(dev, (char*)&capsule, sizeof(struct ku_pir_capsule));
 
     close(dev);
     return status;
