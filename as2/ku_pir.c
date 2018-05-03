@@ -1,11 +1,14 @@
-#include <linux/init.h>
-#include <linux/module.h>
-#include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/cdev.h>
+#include <linux/gpio.h>
+#include <linux/init.h>
 #include <linux/list.h>
-#include <linux/wait.h>
-#include <linux/sched.h>
+#include <linux/slab.h>
+#include <linux/kernel.h>
+#include <linux/module.h>
+#include <linux/uaccess.h>
+#include <linux/spinlock.h>
+#include <linux/interrupt.h>
 
 #include "ku_pir.h"
 
@@ -38,36 +41,37 @@ static int ku_pir_release(struct inode *inode, struct file *file)
     return 0;
 }
 
-static int ku_pir_read(struct file *file, char *buf, size_t len, loff_t *loff)
+static int ku_pir_read(struct file *file, char *buf, size_t len, loff_t *lof)
 {
-    int fd = -1;
+    int fd = -1, ret = 0;
     struct ku_pir_capsule *user_data = (struct ku_pir_capsule*)buf;
     struct ku_pir_list *pos = NULL;
 
-    fd = user_data->fd;
-
-    while(1)
-    {
-        rcu_read_lock();
-        list_for_each_entry_rcu(pos, &ku_list[fd].list, list)
-        {
-            if(pos->data.timestamp > 0)
-            {
-                if(copy_to_user(user_data->data, pos->data, sizeof(struct ku_pir_data)))
-                    return -1;
-                break;
-            }
-        }
-        rcu_read_unlock();
-        wait_event(wq, 1);
-    }
-
+    fd = user_data->fd - 1;
     printk("[KU_PIR] Read - fd %d\n", fd);
 
-    return 0;
+    // Is queue empty?
+    while(1)
+    {
+        if(ku_pir_volume[fd] == 0)
+            wait_event(wq, 1);
+        else
+            break;
+    }
+
+    // Read data
+    rcu_read_lock();
+    list_for_each_entry_rcu(pos, &ku_list[fd].list, list)
+    {
+        if(copy_to_user(user_data->data, &pos->data, sizeof(struct ku_pir_data)))
+            ret = -1;
+    }
+    rcu_read_unlock();
+
+    return ret;
 }
 
-static int ku_pir_write(struct file *file, char *buf, size_t len, loff_t *loff)
+static int ku_pir_write(struct file *file, const char *buf, size_t len, loff_t *lof)
 {
     int fd = -1;
     struct ku_pir_capsule *user_data = NULL;
@@ -86,6 +90,7 @@ static int ku_pir_write(struct file *file, char *buf, size_t len, loff_t *loff)
 
     printk("[KU_PIR] Write - fd %d\n", fd);
 
+    // If queue is full
     if(ku_pir_volume[fd] == KUPIR_MAX_MSG)
     {
         list_for_each_entry_safe(pos, q, &ku_list[fd].list, list)
@@ -98,7 +103,7 @@ static int ku_pir_write(struct file *file, char *buf, size_t len, loff_t *loff)
     }
 
     list_add_tail_rcu(&item->list, &ku_list[fd].list);
-    ku_pir_volime[fd]++;
+    ku_pir_volume[fd]++;
 
     wake_up(&wq);
 
@@ -123,7 +128,7 @@ static long ku_pir_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
                 kfree(pos);
             }
 
-            INIT_LIST_HEAD(&ku_list[fd]);
+            INIT_LIST_HEAD(&ku_list[fd].list);
             ku_pir_volume[fd] = 0;
 
             return 1;
@@ -140,8 +145,11 @@ static long ku_pir_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
                 }
             }
 
-            INIT_LIST_HEAD(&ku_list[fd-1]);
-            ku_pir_volume[fd-1] = 0;
+            if(fd != -1)
+            {
+                INIT_LIST_HEAD(&ku_list[fd-1].list);
+                ku_pir_volume[fd-1] = 0;
+            }
 
             return fd;
 
@@ -158,6 +166,23 @@ static long ku_pir_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
             ku_pir_volume[fd] = 0;
 
             return 1;
+        
+        case KU_PRINT:
+            for(fd=0; fd<KUPIR_MAX_DEV; fd++)
+            {
+                if(fd_list[fd] != 0)
+                {
+                    list_for_each_entry(pos, &ku_list[fd].list, list)
+                    {
+                        printk("[KU_PRINT] fd: %d / ts: %d / flag: %d\n", fd, pos->data.timestamp, pos->data.rf_flag);
+                    }
+                }
+            }
+
+            break;
+
+        default:
+            return -1;
     }
 
     return 0;
@@ -187,6 +212,7 @@ static irqreturn_t ku_pir_isr(int irq, void *dev)
     {
         if(fd_list[fd] == 1)
         {
+            // If queue is full
             if(ku_pir_volume[fd] == KUPIR_MAX_MSG)
             {
                 list_for_each_entry_safe(pos, q, &ku_list[fd].list, list)
@@ -234,7 +260,7 @@ static int __init ku_pir_init(void)
     ret = request_irq(irq_num, ku_pir_isr, IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING, "sensor", NULL);
     if(ret)
     {
-        printk(KERN_ERR, "[KU_PIR] ERROR: unable to request IRQ %d\n", ret);
+        printk("[KU_PIR] ERROR: unable to request IRQ %d\n", ret);
         free_irq(irq_num, NULL);
     }
     else
@@ -244,7 +270,7 @@ static int __init ku_pir_init(void)
     init_waitqueue_head(&wq);
     // Init list
     for(fd=0; fd<KUPIR_MAX_DEV; fd++)
-        INIT_LIST_HEAD(&ku_list[fd]);
+        INIT_LIST_HEAD(&ku_list[fd].list);
 
     return 0;
 }
@@ -265,9 +291,9 @@ static void __exit ku_pir_exit(void)
             kfree(pos);
         }
     }
-    
+ 
     cdev_del(cd_cdev);
-    unregister_chrdev_region(dev_num);
+    unregister_chrdev_region(dev_num, 1);
     free_irq(irq_num, NULL);
     gpio_free(KUPIR_SENSOR);
 }
