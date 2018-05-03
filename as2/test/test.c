@@ -7,9 +7,7 @@
 int main(void)
 {
     struct ku_pir_data data;
-    int dev = open("/dev/ku_pir_dev", O_RDWR);
     int fd = ku_pir_open();
-    int result;
 
     printf("fd: %d\n", fd);
 
@@ -17,11 +15,20 @@ int main(void)
     printf("Insert data status: %d\n", ku_pir_insertData(fd, 3002000, 0));
     printf("Insert data status: %d\n", ku_pir_insertData(fd, 3003000, 1));
 
+    ku_pir_print();
+
     ku_pir_flush(fd);
+
+    ku_pir_print();
 
     printf("Insert data status: %d\n", ku_pir_insertData(fd, 3001000, 1));
     printf("Insert data status: %d\n", ku_pir_insertData(fd, 3002000, 0));
     printf("Insert data status: %d\n", ku_pir_insertData(fd, 3003000, 1));
+
+    ku_pir_print();
+
+    data.timestamp = 0;
+    data.rf_flag = 0;
 
     ku_pir_read(fd, data);
     printf("[READ] ts: %d / flag: %d\n", data.timestamp, data.rf_flag);
@@ -29,6 +36,8 @@ int main(void)
     printf("[READ] ts: %d / flag: %d\n", data.timestamp, data.rf_flag);
     ku_pir_read(fd, &data);
     printf("[READ] ts: %d / flag: %d\n", data.timestamp, data.rf_flag);
+
+    ku_pir_print();
 
     /*
     ku_pir_read(fd, &data);

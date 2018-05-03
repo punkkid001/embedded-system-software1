@@ -45,29 +45,27 @@ static int ku_pir_read(struct file *file, char *buf, size_t len, loff_t *lof)
 {
     int fd = -1, ret = 0;
     struct ku_pir_capsule *user_data = (struct ku_pir_capsule*)buf;
-    struct ku_pir_list *pos = NULL;
+    struct ku_pir_list *pos = NULL, *q = NULL;
 
     fd = user_data->fd - 1;
     printk("[KU_PIR] Read - fd %d\n", fd);
 
-    // Is queue empty?
-    while(1)
-    {
-        if(ku_pir_volume[fd] == 0)
-            wait_event(wq, 1);
-        else
-            break;
-    }
+    // If queue is empty
+    if(ku_pir_volume[fd] == 0)
+        wait_event(wq, ku_pir_volume[fd] > 0);
 
     // Read data
     rcu_read_lock();
     list_for_each_entry_rcu(pos, &ku_list[fd].list, list)
     {
+        printk("[KU_PIR] Read - ts %d / flag %d\n", pos->data.timestamp, pos->data.rf_flag);
         if(copy_to_user(user_data->data, &pos->data, sizeof(struct ku_pir_data)))
             ret = -1;
+        break;
     }
     rcu_read_unlock();
 
+    // Remove data
     list_for_each_entry_safe(pos, q, &ku_list[fd].list, list)
     {
         list_del_rcu(&pos->list);
@@ -214,6 +212,8 @@ static irqreturn_t ku_pir_isr(int irq, void *dev)
         item->data.rf_flag = 1;
     else if(gpio_get_value(KUPIR_SENSOR) == 1)
         item->data.rf_flag = 0;
+    else
+        item->data.rf_flag = -1;
 
     // Push to queue(linked list)
     for(fd=0; fd<KUPIR_MAX_DEV; fd++)

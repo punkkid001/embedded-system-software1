@@ -52,7 +52,7 @@ void ku_pir_read(int fd, struct ku_pir_data *data)
     capsule.data = data;
 
     // using blocking
-    read(dev, &capsule, sizeof(capsule));
+    read(dev, &capsule, sizeof(struct ku_pir_capsule));
 
     close(dev);
 }
