@@ -25,12 +25,12 @@ int main(void)
 
     ku_pir_read(fd, data);
     printf("[READ] ts: %d / flag: %d\n", data.timestamp, data.rf_flag);
-    /*
     ku_pir_read(fd, &data);
     printf("[READ] ts: %d / flag: %d\n", data.timestamp, data.rf_flag);
     ku_pir_read(fd, &data);
     printf("[READ] ts: %d / flag: %d\n", data.timestamp, data.rf_flag);
 
+    /*
     ku_pir_read(fd, &data);
     printf("[FINAL READ] ts: %d / flag: %d\n", data.timestamp, data.rf_flag);
     */

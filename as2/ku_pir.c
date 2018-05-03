@@ -68,6 +68,14 @@ static int ku_pir_read(struct file *file, char *buf, size_t len, loff_t *lof)
     }
     rcu_read_unlock();
 
+    list_for_each_entry_safe(pos, q, &ku_list[fd].list, list)
+    {
+        list_del_rcu(&pos->list);
+        kfree(pos);
+        ku_pir_volume[fd]--;
+        break;
+    }
+
     return ret;
 }
 
