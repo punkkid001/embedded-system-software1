@@ -21,23 +21,28 @@ struct ku_pir_list
 };
 
 dev_t dev_num;
+wait_queue_head_t wq;
+
 int ku_pir_volume[KUPIR_MAX_DEV] = {0, }, fd_list[KUPIR_MAX_DEV] = {0, };
 struct ku_pir_list ku_list[KUPIR_MAX_DEV];
 
 static int irq_num;
-wait_queue_head_t wq;
 static struct cdev *cd_cdev;
 
 
 static int ku_pir_open(struct inode *inode, struct file *file)
 {
     printk("[KU_PIR] Open\n");
+    enable_irq(irq_num);
+
     return 0;
 }
 
 static int ku_pir_release(struct inode *inode, struct file *file)
 {
     printk("[KU_PIR] Release\n");
+    disable_irq(irq_num);
+
     return 0;
 }
 
@@ -267,10 +272,10 @@ static int __init ku_pir_init(void)
     // Init GPIO
     gpio_request_one(KUPIR_SENSOR, GPIOF_IN, "ku_pir_sensor");
     irq_num = gpio_to_irq(KUPIR_SENSOR);
-    ret = request_irq(irq_num, ku_pir_isr, IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING, "sensor", NULL);
+    ret = request_irq(irq_num, ku_pir_isr, IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING, "sensor_irq", NULL);
     if(ret)
     {
-        printk("[KU_PIR] ERROR: unable to request IRQ %d\n", ret);
+        printk(KERN_ERR "[KU_PIR] ERROR: unable to request IRQ %d\n", ret);
         free_irq(irq_num, NULL);
     }
     else
