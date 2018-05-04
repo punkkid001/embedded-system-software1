@@ -32,7 +32,7 @@ static struct cdev *cd_cdev;
 
 static int ku_pir_open(struct inode *inode, struct file *file)
 {
-    printk("[KU_PIR] Open\n");
+    printk("[KU_PIR][INFO] Open\n");
     enable_irq(irq_num);
 
     return 0;
@@ -40,7 +40,7 @@ static int ku_pir_open(struct inode *inode, struct file *file)
 
 static int ku_pir_release(struct inode *inode, struct file *file)
 {
-    printk("[KU_PIR] Release\n");
+    printk("[KU_PIR][INFO] Release\n");
     disable_irq(irq_num);
 
     return 0;
@@ -53,7 +53,6 @@ static int ku_pir_read(struct file *file, char *buf, size_t len, loff_t *lof)
     struct ku_pir_list *pos = NULL, *q = NULL;
 
     fd = user_data->fd - 1;
-    printk("[KU_PIR] Read - fd %d\n", fd);
 
     // If queue is empty
     if(ku_pir_volume[fd] == 0)
@@ -63,7 +62,7 @@ static int ku_pir_read(struct file *file, char *buf, size_t len, loff_t *lof)
     rcu_read_lock();
     list_for_each_entry_rcu(pos, &ku_list[fd].list, list)
     {
-        printk("[KU_PIR] Read - ts %lu / flag %d\n", pos->data.timestamp, pos->data.rf_flag);
+        printk("[KU_PIR][Read][%d] ts: %lu / flag: %d\n", fd, pos->data.timestamp, pos->data.rf_flag);
         if(copy_to_user(user_data->data, &pos->data, sizeof(struct ku_pir_data)))
             ret = -1;
         break;
@@ -102,7 +101,7 @@ static int ku_pir_write(struct file *file, const char *buf, size_t len, loff_t *
     item->data.timestamp = user_data->data->timestamp;
     item->data.rf_flag = user_data->data->rf_flag;
 
-    printk("[KU_PIR] Write - fd %d\n", fd);
+    printk("[KU_PIR][Write] fd: %d\n", fd);
 
     // If queue is full
     if(ku_pir_volume[fd] == KUPIR_MAX_MSG)
@@ -130,7 +129,7 @@ static long ku_pir_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
     int i = 0, fd = -1;
     struct ku_pir_list *pos = NULL, *q = NULL;
 
-    printk("[KU_PIR] Ioctl - arg %ld\n", arg);
+    printk("[KU_PIR][IOCTL] arg: %ld\n", arg);
 
     switch(cmd)
     {
@@ -189,7 +188,7 @@ static long ku_pir_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
                 {
                     list_for_each_entry(pos, &ku_list[fd].list, list)
                     {
-                        printk("[KU_PRINT] fd: %d / ts: %lu / flag: %d\n", fd, pos->data.timestamp, pos->data.rf_flag);
+                        printk("[KU_PRINT][%d] ts: %lu / flag: %d\n", fd, pos->data.timestamp, pos->data.rf_flag);
                     }
                 }
             }
@@ -220,7 +219,7 @@ static irqreturn_t ku_pir_isr(int irq, void *dev)
     else
         return IRQ_NONE;
 
-    printk("[KU_PIR] Detect - ts: %lu / flag: %d\n", item->data.timestamp, item->data.rf_flag);
+    printk("[KU_PIR][Detect] ts: %lu / flag: %d\n", item->data.timestamp, item->data.rf_flag);
 
     // Push to queue(linked list)
     for(fd=0; fd<KUPIR_MAX_DEV; fd++)
@@ -261,7 +260,7 @@ struct file_operations ku_pir_fops =
 static int __init ku_pir_init(void)
 {
     int fd, ret;
-    printk("[KU_PIR] Init\n");
+    printk("[KU_PIR][INFO] Init\n");
 
     // Init character device
     alloc_chrdev_region(&dev_num, 0, 1, DEV_NAME);
@@ -275,7 +274,7 @@ static int __init ku_pir_init(void)
     ret = request_irq(irq_num, ku_pir_isr, IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING, "sensor_irq", NULL);
     if(ret)
     {
-        printk(KERN_ERR "[KU_PIR] ERROR: unable to request IRQ %d\n", ret);
+        printk(KERN_ERR "[KU_PIR][ERROR] Unable to request IRQ: %d\n", ret);
         free_irq(irq_num, NULL);
     }
     else
@@ -295,7 +294,7 @@ static void __exit ku_pir_exit(void)
     int fd;
     struct ku_pir_list *pos = NULL, *q = NULL;
 
-    printk("[KU_PIR] Exit\n");
+    printk("[KU_PIR][INFO] Exit\n");
 
     // Remove list
     for(fd=0; fd<KUPIR_MAX_DEV; fd++)
