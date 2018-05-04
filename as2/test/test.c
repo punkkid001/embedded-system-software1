@@ -30,7 +30,7 @@ int main(void)
     data.timestamp = 0;
     data.rf_flag = 0;
 
-    ku_pir_read(fd, data);
+    ku_pir_read(fd, &data);
     printf("[READ] ts: %d / flag: %d\n", data.timestamp, data.rf_flag);
     ku_pir_read(fd, &data);
     printf("[READ] ts: %d / flag: %d\n", data.timestamp, data.rf_flag);

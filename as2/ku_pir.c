@@ -63,7 +63,7 @@ static int ku_pir_read(struct file *file, char *buf, size_t len, loff_t *lof)
     rcu_read_lock();
     list_for_each_entry_rcu(pos, &ku_list[fd].list, list)
     {
-        printk("[KU_PIR] Read - ts %d / flag %d\n", pos->data.timestamp, pos->data.rf_flag);
+        printk("[KU_PIR] Read - ts %lu / flag %d\n", pos->data.timestamp, pos->data.rf_flag);
         if(copy_to_user(user_data->data, &pos->data, sizeof(struct ku_pir_data)))
             ret = -1;
         break;
@@ -189,7 +189,7 @@ static long ku_pir_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
                 {
                     list_for_each_entry(pos, &ku_list[fd].list, list)
                     {
-                        printk("[KU_PRINT] fd: %d / ts: %d / flag: %d\n", fd, pos->data.timestamp, pos->data.rf_flag);
+                        printk("[KU_PRINT] fd: %d / ts: %lu / flag: %d\n", fd, pos->data.timestamp, pos->data.rf_flag);
                     }
                 }
             }
@@ -213,14 +213,14 @@ static irqreturn_t ku_pir_isr(int irq, void *dev)
         return IRQ_NONE;
     item->data.timestamp = jiffies;
 
-    printk("[KU_PIR] Detect\n");
-
     if(gpio_get_value(KUPIR_SENSOR) == 0)
         item->data.rf_flag = 1;
     else if(gpio_get_value(KUPIR_SENSOR) == 1)
         item->data.rf_flag = 0;
     else
         return IRQ_NONE;
+
+    printk("[KU_PIR] Detect - ts: %lu / flag: %d\n", item->data.timestamp, item->data.rf_flag);
 
     // Push to queue(linked list)
     for(fd=0; fd<KUPIR_MAX_DEV; fd++)
