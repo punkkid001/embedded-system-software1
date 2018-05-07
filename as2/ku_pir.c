@@ -63,11 +63,16 @@ static int ku_pir_read(struct file *file, char *buf, size_t len, loff_t *lof)
     list_for_each_entry_rcu(pos, &ku_list[fd].list, list)
     {
         printk("[KU_PIR][Read][%d] ts: %lu / flag: %d\n", fd, pos->data.timestamp, pos->data.rf_flag);
+        /*
         if(copy_to_user(user_data->data, &pos->data, sizeof(struct ku_pir_data)))
             ret = -1;
+        */
         break;
     }
     rcu_read_unlock();
+
+    if(copy_to_user(user_data->data, &pos->data, sizeof(struct ku_pir_data)))
+        ret = -1;
 
     // Remove data
     if(ret != -1)
@@ -145,7 +150,7 @@ static long ku_pir_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
             INIT_LIST_HEAD(&ku_list[fd].list);
             ku_pir_volume[fd] = 0;
 
-            return 1;
+            break;
 
         case KU_OPEN:
             // Find empty id
@@ -179,7 +184,7 @@ static long ku_pir_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
             ku_pir_volume[fd] = 0;
 
-            return 1;
+            break;
 
         case KU_PRINT:
             for(fd=0; fd<KUPIR_MAX_DEV; fd++)
